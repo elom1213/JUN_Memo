@@ -16,10 +16,10 @@
 import re
 
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (QAction, QColor, QFont, QKeySequence, QPalette, QShortcut, QTextCharFormat, QTextCursor,
-                           QTextFormat, QTextListFormat)
-from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QSizeGrip,
-                               QTextEdit, QToolButton, QVBoxLayout, QWidget, QWidgetAction, QGridLayout)
+from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QKeySequence, QPalette, QShortcut, QTextCharFormat,
+                           QTextCursor, QTextFormat, QTextListFormat)
+from PySide6.QtWidgets import (QApplication, QColorDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+                               QSizeGrip, QTextEdit, QToolButton, QVBoxLayout, QWidget, QWidgetAction, QGridLayout)
 
 from app.core import store as st
 
@@ -46,6 +46,7 @@ def strip_base_size(html):
     """HTML <body style> 의 font-size 를 뺀다 - 남아 있으면 setHtml 이 글자마다 그 크기를 박아 배율이 안 먹는다(v01.05 실측)."""
     return _BODY_SIZE.sub(r"\1", html or "")
 MIN_SIZE = QSize(200, 140)
+TITLE_MIN_W, TITLE_MAX_W = 60, 160   # v01.10 제목칸 너비 (글자만큼, 띠에 잡을 곳이 남게)
 PIN_ON = "#FFB3B3"          # 켜진 Pin = 연한 빨강 (JUN 툴들과 같은 표시)
 
 
@@ -79,6 +80,50 @@ class _Header(QFrame):
 
     def mouseReleaseEvent(self, event):
         self._grab = None
+
+
+class _TitleEdit(QLineEdit):
+    """v01.10 제목칸 - 고치는 중이 아닐 때는 띠처럼 잡고 끌면 창이 움직이고, 끌지 않고 놓으면(클릭) 고치기 시작한다.
+    v01.09 에서 제목칸이 띠를 차지해 노트를 옮길 수 없었다 - 좁은 노트에서도 머리 어디를 잡아도 옮겨지게."""
+
+    def __init__(self, window, parent):
+        super().__init__(parent)
+        # 클릭으로 바로 포커스를 받지 않게(누르는 순간 Qt 가 먼저 포커스를 줘서 끌기가 안 됐다) - 놓을 때 직접 준다
+        self.setFocusPolicy(Qt.TabFocus)
+        self._window = window
+        self._press = None          # (누른 화면 좌표, 창 왼쪽 위와의 차이)
+        self._dragging = False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and not self.hasFocus():
+            g = event.globalPosition().toPoint()
+            self._press = (g, g - self._window.frameGeometry().topLeft())
+            self._dragging = False
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._press is not None and event.buttons() & Qt.LeftButton:
+            g = event.globalPosition().toPoint()
+            if self._dragging or (g - self._press[0]).manhattanLength() >= QApplication.startDragDistance():
+                self._dragging = True
+                self._window.move(g - self._press[1])
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._press is not None:
+            dragged = self._dragging
+            self._press = None
+            self._dragging = False
+            if not dragged:                                 # 클릭 = 고치기 시작 (누른 자리에 커서)
+                self.setFocus(Qt.MouseFocusReason)
+                self.setCursorPosition(self.cursorPositionAt(event.position().toPoint()))
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class NoteWindow(QWidget):
@@ -128,18 +173,20 @@ class NoteWindow(QWidget):
         self.lbl_scope.setFixedHeight(18)
         hl.addWidget(self.lbl_scope, 0, Qt.AlignVCenter)
         # v01.09 제목 - 범위 배지 옆. 띠의 빈 곳은 그대로 끌어서 창을 옮길 수 있다
-        self.ipf_title = QLineEdit(self.header)
+        self.ipf_title = _TitleEdit(self, self.header)
         self.ipf_title.setObjectName("noteTitle")
         self.ipf_title.setPlaceholderText("Title")
         self.ipf_title.setToolTip("Title of this note (shown in the notes list and searched too).")
         self.ipf_title.setFrame(False)
         self.ipf_title.setFixedHeight(22)
-        self.ipf_title.setMinimumWidth(40)
         self.ipf_title.setText(note.get("title", ""))
         self.ipf_title.textEdited.connect(self._on_title_edited)
         self.ipf_title.returnPressed.connect(lambda: self.editor.setFocus())
         hl.addSpacing(4)
-        hl.addWidget(self.ipf_title, 1, Qt.AlignVCenter)
+        # v01.10 제목칸은 글자만큼만 (늘어나지 않게) - 띠를 다 차지하면 잡고 옮길 빈 곳이 없었다. 남는 곳은 아래 stretch = 잡는 곳
+        hl.addWidget(self.ipf_title, 0, Qt.AlignVCenter)
+        hl.addStretch(1)
+        self._fit_title_width()
         self.btn_pin = self._tool("Pin", "Keep this note on top of other windows")
         self.btn_pin.setCheckable(True)
         self.btn_pin.toggled.connect(self._on_pin_clicked)
@@ -299,9 +346,19 @@ class NoteWindow(QWidget):
         """v01.09 밖(다시 읽은 공유 노트 등)에서 제목을 바꿀 때 - 신호 없이."""
         if self.ipf_title.text() != title:
             self.ipf_title.setText(title)
+            self._fit_title_width()
         self.setWindowTitle(self._title())
 
+    def _fit_title_width(self):
+        """v01.10 제목칸 너비 = 글자 폭 (스타일시트와 같은 굵은 13px 기준), 60 ~ 160 px. 나머지 띠는 잡고 옮기는 곳."""
+        f = QFont(self.ipf_title.font())
+        f.setPixelSize(13)
+        f.setBold(True)
+        text = self.ipf_title.text() or self.ipf_title.placeholderText()
+        self.ipf_title.setFixedWidth(max(TITLE_MIN_W, min(TITLE_MAX_W, QFontMetrics(f).horizontalAdvance(text) + 16)))
+
     def _on_title_edited(self, text):
+        self._fit_title_width()
         self.setWindowTitle(self._title())
         if not self._loading:
             self.titleChanged.emit(self.note_id, text)

@@ -78,7 +78,8 @@ class _Card(QFrame):
         top.addWidget(self.lbl_scope, 0, Qt.AlignVCenter)
         # v01.09 제목 - 범위 배지 옆 (없으면 비운다). 좁으면 잘리고 시각은 늘 보인다
         title = note.get("title", "")
-        self.lbl_title = QLabel(title if len(title) <= 60 else title[:59] + "…")
+        # v01.10 부모(self)를 꼭 준다 - 부모 없이 setVisible(True) 하면 잠깐 독립 창으로 떴다 사라졌다(글 칠 때마다 목록을 다시 그려 반복)
+        self.lbl_title = QLabel(title if len(title) <= 60 else title[:59] + "…", self)
         self.lbl_title.setObjectName("cardTitle")
         self.lbl_title.setToolTip(title)
         self.lbl_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -86,7 +87,8 @@ class _Card(QFrame):
         f.setPointSizeF(9 * zoom)
         f.setBold(True)
         self.lbl_title.setFont(f)
-        self.lbl_title.setVisible(bool(title))
+        if not title:
+            self.lbl_title.hide()
         top.addSpacing(4)
         top.addWidget(self.lbl_title, 1, Qt.AlignVCenter)
         if not title:
