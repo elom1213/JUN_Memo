@@ -14,7 +14,8 @@
 """
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QShortcut, QTextCharFormat, QTextCursor, QTextListFormat
+from PySide6.QtGui import (QAction, QColor, QFont, QKeySequence, QPalette, QShortcut, QTextCharFormat, QTextCursor,
+                           QTextListFormat)
 from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox, QSizeGrip, QTextEdit,
                                QToolButton, QVBoxLayout, QWidget, QWidgetAction, QGridLayout)
 
@@ -231,18 +232,25 @@ class NoteWindow(QWidget):
     def set_color(self, color, emit=True):
         pal = st.palette(color)
         self.color = color
+        sel_bg, sel_fg = st.selection_colors(color)
         self.setStyleSheet(
             "NoteWindow {{ background: {body}; border: 1px solid #00000040; }}"
             "#noteHeader {{ background: {header}; }}"
             "#noteFooter {{ background: {body}; }}"
             "#noteEditor {{ background: {body}; color: {text}; border: none; padding: 6px 10px; "
-            "selection-background-color: #00000040; }}"
+            "selection-background-color: {sel_bg}; selection-color: {sel_fg}; }}"
             "QToolButton {{ color: {text}; background: transparent; border: none; font-size: 13px; padding: 0 6px; }}"
             "QToolButton:hover {{ background: #0000001F; }}"
             "QToolButton:checked {{ background: {pin}; color: #202020; }}"
             "QToolButton::menu-indicator {{ image: none; width: 0; }}"
             "#scopeTag {{ color: {text}; border: 1px solid {text}; border-radius: 3px; padding: 0 4px; "
-            "font-size: 9px; }}".format(pin=PIN_ON, **pal))
+            "font-size: 9px; }}".format(pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
+        # 팔레트에도 같은 선택 색 - 창이 포커스를 잃었을 때(Inactive)도 선택이 보이게 (스타일시트만으로는 비활성 색이 남는다)
+        qp = self.editor.palette()
+        for group in (QPalette.Active, QPalette.Inactive):
+            qp.setColor(group, QPalette.Highlight, QColor(sel_bg))
+            qp.setColor(group, QPalette.HighlightedText, QColor(sel_fg))
+        self.editor.setPalette(qp)
         if emit and not self._loading:
             self.colorChanged.emit(self.note_id, color)
 

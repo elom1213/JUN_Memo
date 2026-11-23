@@ -104,6 +104,21 @@ def palette(color):
     return {"body": color.upper(), "header": header, "text": "#202020" if luminance > 140 else "#FFFFFF"}
 
 
+SELECTION_BG = "#0078D7"        # Windows 선택 파랑
+SELECTION_ALT = "#E67E00"       # 바탕이 그 파랑과 비슷할 때
+SELECTION_FG = "#FFFFFF"
+
+
+def selection_colors(color):
+    """(선택 바탕, 선택 글자) - 불투명. v01.03: 반투명 검정은 다크 모드 팔레트와 섞여 끌어 고른 영역이 안 보였다(사용자).
+    7색 모두 · 차콜과 대비가 큰 Windows 파랑, 사용자 색이 그 파랑과 비슷하면 주황."""
+    body = palette(color)["body"]
+    r, g, b = _hex_rgb(body)
+    sr, sg, sb = _hex_rgb(SELECTION_BG)
+    near = abs(r - sr) + abs(g - sg) + abs(b - sb) < 150
+    return (SELECTION_ALT if near else SELECTION_BG), SELECTION_FG
+
+
 # ---------------------------------------------------------------------- 파일
 def _read_json(path):
     with open(path, "r", encoding="utf-8") as fh:

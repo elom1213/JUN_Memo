@@ -90,6 +90,7 @@ class ListWindow(QWidget):
     reloadRequested = Signal()
     startMenuRequested = Signal()
     taskbarRequested = Signal()
+    pushSharedRequested = Signal()              # v01.03 공유 노트만 GitHub 로
 
     def __init__(self, store):
         super().__init__(None, Qt.Window)
@@ -161,9 +162,20 @@ class ListWindow(QWidget):
         self.list.customContextMenuRequested.connect(self._on_menu)
         root.addWidget(self.list, 1)
 
+        bottom = QHBoxLayout()
         self.lbl_count = QLabel("")
         self.lbl_count.setObjectName("count")
-        root.addWidget(self.lbl_count)
+        bottom.addWidget(self.lbl_count, 1)
+        # v01.03 Push Shared - 공유 노트(shared/notes)만 커밋해 GitHub 로 (이 PC 노트 · 다른 파일은 안 올라간다)
+        self.btn_push = QToolButton(self)
+        self.btn_push.setObjectName("pushShared")
+        self.btn_push.setText("Push Shared")
+        self.btn_push.setToolTip("Send the Shared notes to GitHub (only shared/notes - This PC notes stay here).\n"
+                                 "If another PC pushed first, its shared notes are pulled in, then this pushes.")
+        self.btn_push.setCursor(Qt.PointingHandCursor)
+        self.btn_push.clicked.connect(self.pushSharedRequested.emit)
+        bottom.addWidget(self.btn_push)
+        root.addLayout(bottom)
 
         view = store.list_view
         self.set_color(view.get("color") or st.DEFAULT_LIST_COLOR, emit=False)
@@ -229,6 +241,7 @@ class ListWindow(QWidget):
         dark = pal["text"] == "#FFFFFF"
         field = "#4A4A4A" if dark else "#FFFFFF"
         ring = "#C8C8C8" if dark else "#7A7A7A"          # 안 고른 라디오 테두리 (글자보다 조금 옅게)
+        sel_bg, sel_fg = st.selection_colors(color)     # v01.03 검색칸 선택도 불투명하게
         self.setStyleSheet(
             "#listWindow {{ background: {body}; }}"
             "#listWindow QLabel, #listWindow QRadioButton {{ color: {text}; background: transparent; }}"
@@ -242,7 +255,7 @@ class ListWindow(QWidget):
             "cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {text}, stop:0.5 {text}, stop:0.56 {field}, stop:1 {field}); }}"
             "#listWindow QRadioButton:checked {{ font-weight: bold; }}"
             "#search {{ background: {field}; color: {text}; border: 1px solid {header}; border-radius: 3px; "
-            "padding: 3px 6px; selection-background-color: #00000040; }}"
+            "padding: 3px 6px; selection-background-color: {sel_bg}; selection-color: {sel_fg}; }}"
             "#notes {{ background: transparent; border: none; }}"
             "#notes::item:selected {{ background: #00000018; }}"
             "#listWindow > QToolButton {{ color: {text}; background: transparent; border: none; font-size: 13px; "
@@ -250,7 +263,11 @@ class ListWindow(QWidget):
             "#listWindow > QToolButton:hover {{ background: #0000001F; }}"
             "#listWindow > QToolButton:checked {{ background: {pin}; color: #202020; }}"
             "#listWindow > QToolButton::menu-indicator {{ image: none; width: 0; }}"
-            "#count {{ color: {text}; }}".format(field=field, ring=ring, pin=PIN_ON, **pal))
+            "#pushShared {{ color: {text}; background: {field}; border: 1px solid {ring}; border-radius: 3px; "
+            "padding: 3px 10px; }}"
+            "#pushShared:hover {{ border-color: {text}; }}"
+            "#pushShared:disabled {{ color: {ring}; }}"
+            "#count {{ color: {text}; }}".format(field=field, ring=ring, pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
         if emit:
             self.store.list_view["color"] = color
             self.viewChanged.emit()

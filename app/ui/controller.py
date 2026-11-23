@@ -15,6 +15,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.config.version import APP_NAME
+from app.core import git_sync
 from app.core import shell_integration
 
 from app.core import store as st
@@ -41,6 +42,7 @@ class Controller(QObject):
         lw.reloadRequested.connect(self.reload_shared)
         lw.startMenuRequested.connect(self.add_to_start_menu)
         lw.taskbarRequested.connect(self.pin_to_taskbar)
+        lw.pushSharedRequested.connect(self.push_shared)
         self.messages = []                          # 마지막 안내 문구들 (시험이 본다)
         self.quiet = False                          # True 면 메시지 창을 띄우지 않는다 (시험)
         self._save_timer = QTimer(self)
@@ -233,6 +235,30 @@ class Controller(QObject):
             "2. Choose 'Pin to taskbar'.\n\n"
             "The pinned button starts {0} directly, without a console window.\n\n"
             "Another way: open Start > All apps, right-click '{0}' and choose More > 'Pin to taskbar'.".format(APP_NAME))
+
+    def push_shared(self):
+        """v01.03 Push Shared - 열린 노트까지 저장하고 공유 노트(shared/notes)만 커밋 · 푸시 (core/git_sync)."""
+        for note_id in list(self.windows):
+            self._pull_content(note_id)
+        self.save_now()
+        lw = self.list_window
+        lw.btn_push.setEnabled(False)
+        lw.btn_push.setText("Pushing...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            result = git_sync.push_shared(self.store.shared_dir)
+        finally:
+            QApplication.restoreOverrideCursor()
+            lw.btn_push.setText("Push Shared")
+            lw.btn_push.setEnabled(True)
+        self.last_push = result
+        text = result.message
+        if result.pulled:
+            added, changed, removed = self.store.reload_shared()
+            self.list_window.refresh()
+            text += "\nFrom the other PC: {0} new, {1} changed, {2} removed.".format(added, changed, removed)
+        self._inform("Push Shared", text, warn=result.status in ("error", "blocked"))
 
     def set_pinned(self, note_id, on):
         if self.store.update(note_id, pinned=bool(on)):
