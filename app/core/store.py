@@ -18,7 +18,9 @@
 --------------------------------------
     local_dir (%APPDATA%/JUN_Memo)
         notes.json   : 이 PC 노트의 내용 (id · html · text · color · created · modified)
-        state.json   : 보기 상태 - 노트마다 {open, pinned, geometry} (공유 노트 것도 여기), 목록 창 {color, pinned, geometry}
+        state.json   : 보기 상태 - 노트마다 {open, pinned, geometry} (공유 노트 것도 여기), 목록 창 {color, pinned, geometry},
+                       note_color (v01.08 새 노트의 기본 색 = 마지막으로 고른 노트 색),
+                       order (v01.08 목록에서 끌어 놓아 정한 순서 - 노트 id 목록. PC 마다 다를 수 있다)
     shared_dir (저장소 안 shared/notes)
         <id>.json    : 공유 노트 하나 = 파일 하나 (내용만). 두 PC 가 **다른** 노트를 고치면 git 에서 충돌하지 않는다.
                        창을 옮기거나 Pin 해도 이 파일은 안 바뀐다(보기 상태는 state.json) - 공유 파일이 쓸데없이 바뀌지 않게.
@@ -166,6 +168,8 @@ class NoteStore(object):
         self.shared_dir = shared_dir or default_shared_dir()
         self.notes = {}             # id -> note
         self.list_view = {"color": DEFAULT_LIST_COLOR, "pinned": False, "geometry": None, "shrunk": False, "zoom": 1.0}
+        self.order = []                     # v01.08 끌어 놓아 정한 목록 순서 (id). 비어 있으면 최근에 고친 것이 위
+        self.note_color = DEFAULT_COLOR     # v01.08 새 노트의 기본 색 - 마지막으로 고른(저장된) 노트 색을 따른다
         self.error = ""             # 마지막 읽기 / 쓰기 문제 (UI 가 로그로 보여 준다)
         self._shared_written = {}   # id -> 마지막으로 쓰거나 읽은 공유 파일 내용 (바뀐 것만 쓰기)
         self.load()
@@ -244,6 +248,16 @@ class NoteStore(object):
                           "shrunk": bool(lv.get("shrunk", False)),
                           "zoom": clamp_zoom(lv.get("zoom", 1.0)),
                           "geometry": [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None}
+        order = state.get("order")
+        self.order = [str(i) for i in order if str(i) in self.notes] if isinstance(order, list) else []
+        # v01.08 새 노트 기본 색: state.json 의 note_color → 없으면(옛 파일) 가장 최근에 고친 노트 색 → 노랑
+        saved = state.get("note_color")
+        if is_color(saved):
+            self.note_color = saved
+        elif self.notes:
+            self.note_color = max(self.notes.values(), key=lambda n: n["modified"])["color"]
+        else:
+            self.note_color = DEFAULT_COLOR
 
     @staticmethod
     def _normalize(raw, scope):
@@ -279,7 +293,9 @@ class NoteStore(object):
                      if n["scope"] == SCOPE_LOCAL]
             _write_json(self.notes_path, {"version": FILE_VERSION, "notes": local}, backup=True)
             views = {i: {k: n[k] for k in VIEW_KEYS} for i, n in self.notes.items()}
-            _write_json(self.state_path, {"version": FILE_VERSION, "notes": views, "list": dict(self.list_view)},
+            _write_json(self.state_path, {"version": FILE_VERSION, "notes": views, "list": dict(self.list_view),
+                                          "note_color": self.note_color,
+                                          "order": [i for i in self.order if i in self.notes]},
                         backup=True)
         except OSError as exc:
             self.error = "Could not save in {0}: {1}".format(self.local_dir, exc)
@@ -313,7 +329,7 @@ class NoteStore(object):
     def new_note(self, color=None, geometry=None, scope=SCOPE_LOCAL):
         now = time.time()
         note = {"id": uuid.uuid4().hex, "scope": scope if scope in SCOPES else SCOPE_LOCAL, "html": "", "text": "",
-                "color": color or DEFAULT_COLOR, "pinned": False, "open": True,
+                "color": color if is_color(color) else self.note_color, "pinned": False, "open": True,
                 "geometry": list(geometry) if geometry else None, "zoom": 1.0, "created": now, "modified": now}
         self.notes[note["id"]] = note
         return note
@@ -345,6 +361,8 @@ class NoteStore(object):
                 value = clamp_zoom(value)
             if key == "scope" and value not in SCOPES:
                 raise ValueError(value)
+            if key == "color" and is_color(value):
+                self.note_color = value                     # v01.08 고른 색 = 다음 새 노트의 기본 색
             if note.get(key) != value:
                 note[key] = value
                 changed = True
@@ -358,11 +376,32 @@ class NoteStore(object):
         return note is not None and not note["text"].strip()
 
     def ordered(self, query="", scope=None):
-        """목록 순서: 최근에 고친 것이 위. query = 공백으로 나눈 낱말이 모두(대소문자 무시). scope = None(전부) / local / shared."""
+        """목록 순서. query = 공백으로 나눈 낱말이 모두(대소문자 무시). scope = None(전부) / local / shared.
+
+        v01.08: 끌어 놓아 정한 순서(self.order)가 있으면 그 순서. 그 순서에 없는 노트(새 노트 · 다른 PC 에서 온 공유 노트)는
+        맨 위에, 그것들끼리는 최근에 고친 것이 위. 순서를 한 번도 안 정했으면 예전처럼 최근에 고친 것이 위."""
         words = [w.lower() for w in (query or "").split() if w]
         out = [n for n in self.notes.values() if all(w in n["text"].lower() for w in words) and
                (scope is None or n["scope"] == scope)]
-        return sorted(out, key=lambda n: n["modified"], reverse=True)
+        rank = {note_id: i for i, note_id in enumerate(self.order)}
+        return sorted(out, key=lambda n: (1, rank[n["id"]], 0) if n["id"] in rank else (0, 0, -n["modified"]))
+
+    def set_order(self, visible_ids):
+        """목록에서 끌어 놓은 뒤 보이는 순서(visible_ids)를 저장한다. 바뀌었으면 True.
+
+        검색 · 범위로 걸러 일부만 보일 때도 된다 - 전체 순서에서 보이던 노트들이 있던 자리에 새 순서대로 다시 넣고,
+        안 보이던 노트는 제자리에 둔다."""
+        full = [n["id"] for n in self.ordered()]
+        visible = [i for i in visible_ids if i in self.notes]
+        seen = set(visible)
+        if len(seen) != len(visible):
+            return False
+        it = iter(visible)
+        new = [next(it) if note_id in seen else note_id for note_id in full]
+        if new == self.order:
+            return False
+        self.order = new
+        return True
 
     def reload_shared(self):
         """공유 폴더를 다시 읽는다 (git pull 뒤). 열린 창이 없는 공유 노트만 바뀐다 - 고치는 중인 노트는 건드리지 않는다.

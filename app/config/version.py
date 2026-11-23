@@ -32,7 +32,10 @@
 # 01.07  (2026-11-23) Shared / This PC 를 색으로 구분 - 노트 위쪽 · 목록 카드의 배지를 꽉 찬 범위 색(Shared 파랑 #1A73E8,
 #        This PC 초록 #2E7D32, 흰 글자)으로, 목록 카드 왼쪽에 같은 색 띠. Push Shared 버튼 테두리가 안 보이던 것(선택자 구체성).
 
-VERSION = "01.07"
+# 01.08  (2026-11-23) 새 노트의 기본 색 = 저장된 노트 색(마지막으로 고른 색, state.json note_color - 옛 파일이면 가장 최근에 고친
+#        노트 색). 목록 카드를 끌어 놓아 순서 바꾸기(state.json order, 걸러 보일 때는 보이던 자리끼리, 새 노트는 맨 위).
+
+VERSION = "01.08"
 APP_NAME = "JUN Memo"
 APP_USER_MODEL_ID = "JUN.Memo"
 LAST_UPDATE = "2026-11-23"

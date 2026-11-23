@@ -56,6 +56,10 @@ try:
     check("store: new note is yellow, open, not pinned", n1["color"] == "Yellow" and n1["open"] and not n1["pinned"])
     time.sleep(0.01)
     n2 = s.new_note(color="Blue")
+    check("store: picking a colour makes it the new-note default", s.update(n2["id"], color="#474747") and
+          s.new_note()["color"] == "#474747")
+    s.delete([i for i in s.notes if i not in (n1["id"], n2["id"])][0])
+    s.update(n2["id"], color="Blue")
     check("store: set_content changes and bumps modified only when different",
           s.set_content(n1["id"], "<p>hi</p>", "Buy milk\nand eggs") and not s.set_content(n1["id"], "<p>hi</p>", "Buy milk\nand eggs"))
     time.sleep(0.02)                                        # 수정 시각이 같은 밀리초가 되지 않게

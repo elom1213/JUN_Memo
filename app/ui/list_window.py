@@ -17,7 +17,7 @@ v01.01
 
 import time
 
-from PySide6.QtCore import QEvent, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QColorDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QRadioButton, QToolButton,
@@ -189,7 +189,13 @@ class ListWindow(QWidget):
         self.list.setSpacing(4)
         self.list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.list.setToolTip("Click a note to open it. Right-click: open, color, shared / this PC, delete.\n"
+        # v01.08 카드를 끌어 놓아 순서 바꾸기 - 놓은 뒤 순서를 저장소에 넘기고 카드를 다시 그린다
+        self.list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.list.setDefaultDropAction(Qt.MoveAction)
+        self.list.setDropIndicatorShown(True)
+        self.list.model().rowsMoved.connect(lambda *_: QTimer.singleShot(0, self._on_reordered))
+        self.list.setToolTip("Click a note to open it. Drag a note up or down to change the order.\n"
+                             "Right-click: open, color, shared / this PC, delete.\n"
                              "Ctrl + mouse wheel: bigger / smaller text.")
         self.list.viewport().installEventFilter(self)            # v01.05 Ctrl + 휠 = 목록 글자 크기
         self.list.itemClicked.connect(self._on_clicked)
@@ -390,6 +396,12 @@ class ListWindow(QWidget):
 
     def item_ids(self):
         return [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())]
+
+    def _on_reordered(self):
+        """v01.08 끌어 놓은 뒤 - 보이는 순서를 저장하고(viewChanged = 저장) 카드를 다시 만든다(옮긴 칸의 카드가 비지 않게)."""
+        if self.store.set_order(self.item_ids()):
+            self.viewChanged.emit()
+        self.refresh()
 
     def _on_clicked(self, item):
         self.openRequested.emit(item.data(Qt.UserRole))

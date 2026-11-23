@@ -28,7 +28,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 ```
 
 ### 노트 목록
-- **`+`** (Ctrl+N) — 새 노트. 기본 색은 스티커 메모와 같은 **노랑**. 필터가 `Shared` 면 공유 노트로 만든다.
+- **`+`** (Ctrl+N) — 새 노트. 기본 색은 **저장된 노트 색** — 마지막으로 고른 노트 색(v01.08, 처음엔 노랑). 필터가 `Shared` 면 공유 노트로 만든다.
 - **`Shrink`** (v01.04) — 목록 창을 **272 x 155** 로 줄이고 **움직이는 아이콘**(색 스티커가 떨어져 → 연필이 세 줄 쓰고 → 압정 → 날아가고 다음 색, 끝없이 반복)과
   `Shrunk` · `Pin` 만 남긴다(Shrunk 는 켜져도 빨갛지 않다). 아이콘을 클릭하거나 `Shrunk` 를 누르면 원래 크기 · 검색어 · 필터 그대로 펴진다. 줄인 채 끄면 줄인 채로 켜진다.
 - **`Pin`** — 목록 창을 늘 맨 위에(켜지면 `Pinned` · 연한 빨강). 줄인 동안에는 Shrunk 아래.
@@ -41,7 +41,8 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 - 카드 = 노트의 색 · 앞부분 3줄 · 마지막으로 고친 시각(오늘이면 시:분), 📌 = Pin.
 - **카드를 클릭하면 그 노트가 스티커 창으로 열린다.** 이미 열려 있으면 앞으로 나온다.
 - 우클릭 — Open · Color(7색) · Delete.
-- 최근에 고친 노트가 위.
+- **카드를 위아래로 끌어 놓으면 순서가 바뀐다**(v01.08, 이 PC 에 기억). 검색 · 범위로 걸러 둔 채 옮기면 보이던 노트들끼리만 자리가 바뀐다.
+  한 번도 끌지 않았으면 최근에 고친 노트가 위, 새 노트는 늘 맨 위.
 
 ### 노트 (스티커 창)
 | 자리 | 동작 |
@@ -64,7 +65,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 
 - 이 PC 노트 · 공유 노트가 따로 저장된다 — 3장.
 - **자동 저장** — 글을 칠 때마다가 아니라 멈추고 0.5초 뒤, 그리고 노트를 닫을 때 · 앱을 끌 때 바로.
-- 파일: **`%APPDATA%\JUN_Memo\notes.json`**(이 PC 노트의 내용 · 색 · 만든 / 고친 시각) + **`state.json`**(모든 노트의 열림 · 창 자리 · 크기 · Pin, 목록 창 색 · Pin · 자리).
+- 파일: **`%APPDATA%\JUN_Memo\notes.json`**(이 PC 노트의 내용 · 색 · 만든 / 고친 시각) + **`state.json`**(모든 노트의 열림 · 창 자리 · 크기 · Pin, 목록 창 색 · Pin · 자리, 목록 순서 · 새 노트 기본 색).
   쓰기는 임시 파일 → 한 번에 바꾸기라 쓰다 꺼져도 깨지지 않고, 직전 파일을 `notes.json.bak` 으로 하나 남긴다(깨졌으면 그것을 읽는다).
 - **다시 켜면 열려 있던 노트가 그 자리 · 크기 · 색 · Pin 그대로 다시 열린다.** 저장된 자리가 지금 어느 화면에도 없으면(모니터를 뺐을 때) 주 화면으로.
 - **한 번만 실행** — 이미 떠 있을 때 다시 실행하면 새로 뜨지 않고, 떠 있는 앱의 노트 목록이 앞으로 나온다.
@@ -115,7 +116,7 @@ JUN_Memo/
 ├── app/ui/controller.py   # 목록 · 노트 창 · 저장 잇기 (자동 저장, 빈 노트 지우기, 다시 열기)
 ├── icon/JUN_Memo.ico · .png
 ├── shared/notes/          # 공유 노트 (<id>.json, git 으로 올라간다)
-└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py · test_scope_colors.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
+└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py · test_scope_colors.py · test_default_color.py · test_reorder.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
 ```
 
 ## 6. 시험
