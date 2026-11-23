@@ -51,7 +51,16 @@ COLORS = {
 DEFAULT_COLOR = "Yellow"
 DEFAULT_LIST_COLOR = "Gray"
 CONTENT_KEYS = ("id", "html", "text", "color", "created", "modified")
-VIEW_KEYS = ("open", "pinned", "geometry")
+VIEW_KEYS = ("open", "pinned", "geometry", "zoom")
+ZOOM_MIN, ZOOM_MAX, ZOOM_STEP = 0.6, 3.0, 0.1       # v01.05 글자 크기 배율 (노트마다 · 목록 창)
+
+
+def clamp_zoom(value):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    return round(min(ZOOM_MAX, max(ZOOM_MIN, v)), 2)
 
 
 def default_local_dir():
@@ -153,7 +162,7 @@ class NoteStore(object):
         self.local_dir = local_dir
         self.shared_dir = shared_dir or default_shared_dir()
         self.notes = {}             # id -> note
-        self.list_view = {"color": DEFAULT_LIST_COLOR, "pinned": False, "geometry": None, "shrunk": False}
+        self.list_view = {"color": DEFAULT_LIST_COLOR, "pinned": False, "geometry": None, "shrunk": False, "zoom": 1.0}
         self.error = ""             # 마지막 읽기 / 쓰기 문제 (UI 가 로그로 보여 준다)
         self._shared_written = {}   # id -> 마지막으로 쓰거나 읽은 공유 파일 내용 (바뀐 것만 쓰기)
         self.load()
@@ -224,11 +233,13 @@ class NoteStore(object):
             note["pinned"] = bool(view.get("pinned", False))
             geo = view.get("geometry")
             note["geometry"] = [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None
+            note["zoom"] = clamp_zoom(view.get("zoom", 1.0))
         lv = state.get("list") if isinstance(state.get("list"), dict) else {}
         geo = lv.get("geometry")
         self.list_view = {"color": lv.get("color") if is_color(lv.get("color")) else DEFAULT_LIST_COLOR,
                           "pinned": bool(lv.get("pinned", False)),
                           "shrunk": bool(lv.get("shrunk", False)),
+                          "zoom": clamp_zoom(lv.get("zoom", 1.0)),
                           "geometry": [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None}
 
     @staticmethod
@@ -247,6 +258,7 @@ class NoteStore(object):
             "pinned": bool(raw.get("pinned", False)),
             "open": bool(raw.get("open", False)),
             "geometry": [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None,
+            "zoom": clamp_zoom(raw.get("zoom", 1.0)),
             "created": float(raw.get("created") or now),
             "modified": float(raw.get("modified") or raw.get("created") or now),
         }
@@ -299,7 +311,7 @@ class NoteStore(object):
         now = time.time()
         note = {"id": uuid.uuid4().hex, "scope": scope if scope in SCOPES else SCOPE_LOCAL, "html": "", "text": "",
                 "color": color or DEFAULT_COLOR, "pinned": False, "open": True,
-                "geometry": list(geometry) if geometry else None, "created": now, "modified": now}
+                "geometry": list(geometry) if geometry else None, "zoom": 1.0, "created": now, "modified": now}
         self.notes[note["id"]] = note
         return note
 
@@ -322,10 +334,12 @@ class NoteStore(object):
             return False
         changed = False
         for key, value in fields.items():
-            if key not in ("color", "pinned", "open", "geometry", "scope"):
+            if key not in ("color", "pinned", "open", "geometry", "scope", "zoom"):
                 raise KeyError(key)
             if key == "geometry" and value is not None:
                 value = [int(v) for v in value]
+            if key == "zoom":
+                value = clamp_zoom(value)
             if key == "scope" and value not in SCOPES:
                 raise ValueError(value)
             if note.get(key) != value:

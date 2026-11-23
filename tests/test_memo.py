@@ -147,8 +147,13 @@ try:
           os.path.isfile(cpath))
     nw.editor.setPlainText("Call Mom\nabout Sunday")
     check("app: typing saves a moment later (not on every key)", st.NoteStore(cpath).get(nid)["text"] == "")
-    pump(ctl.SAVE_MS + 300)
-    check("app: ... saved", st.NoteStore(cpath).get(nid)["text"] == "Call Mom\nabout Sunday")
+    # 저장 타이머(SAVE_MS) 뒤를 기다린다 - 고정 시간만 기다리면 처음 실행(컴파일 등)에 느려 흔들렸다 → 저장될 때까지 최대 3초
+    waited = 0
+    while waited < 3000 and st.NoteStore(cpath).get(nid)["text"] != "Call Mom\nabout Sunday":
+        pump(100)
+        waited += 100
+    check("app: ... saved (after the save delay, not before it)", st.NoteStore(cpath).get(nid)["text"] ==
+          "Call Mom\nabout Sunday" and waited >= ctl.SAVE_MS - 100, waited)
     check("app: the list shows the note's first lines", c.list_window.list.count() == 1 and
           "Call Mom" in c.list_window.list.itemWidget(c.list_window.list.item(0)).lbl_text.text())
     nw.btn_new.click()

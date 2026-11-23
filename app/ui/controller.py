@@ -121,6 +121,7 @@ class Controller(QObject):
         win.colorChanged.connect(self.set_color)
         win.pinChanged.connect(self.set_pinned)
         win.scopeChanged.connect(self.set_scope)
+        win.zoomChanged.connect(self._on_zoom)
         self.windows[note_id] = win
         win.show()
         win.bring_to_front()
@@ -157,6 +158,11 @@ class Controller(QObject):
             if win is not None and win.color != color:
                 win.set_color(color, emit=False)
             self.save_now()
+
+    def _on_zoom(self, note_id, value):
+        """v01.05 노트 글자 크기 - 이 PC 의 보기 상태(state.json)."""
+        if self.store.update(note_id, zoom=value):
+            self.schedule_save()
 
     def set_scope(self, note_id, scope):
         """Shared (저장소 shared/notes) ↔ This PC (%APPDATA%). 저장할 때 파일이 옮겨진다."""

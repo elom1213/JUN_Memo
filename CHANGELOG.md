@@ -1,5 +1,16 @@
 # Changelog — JUN_Memo
 
+## [01.05] - 2026-11-23
+
+- **[New] 글자 크기**
+  - **노트**: 아래 줄 **`A−` · `100%` · `A+`**(퍼센트 클릭 = 100%), **Ctrl + 마우스 휠**, Ctrl+= / Ctrl+− / Ctrl+0. 60 ~ 300%, 10% 씩.
+    노트마다 따로 기억 — 창 자리처럼 **이 PC 의 `state.json`** 에 두므로 공유 노트 파일은 바뀌지 않는다(PC 마다 다른 크기 가능). 굵게 · 글머리표 등 서식은 그대로 함께 커진다.
+  - **목록 창 카드 글자**: 목록 위에서 Ctrl + 휠, `…` > `Larger text` / `Smaller text` / `Reset text size`. 기억.
+  - 실측으로 잡은 것: 저장 HTML 의 `<body style="font-size:11pt">` 를 `setHtml` 이 **글자마다 11pt 로 박아** 크기를 바꿔도 안 커졌다 →
+    읽고 저장할 때 body 의 font-size 를 뺀다(이미 저장된 노트도 읽을 때 정리). `QFont("Segoe UI", 13.2)` 는 **13 으로 잘린다** → `setPointSizeF`.
+- **[Change] `Shrunk` 버튼은 켜져 있어도 연한 빨강이 아니다**(사용자) — 평소 버튼 모양, 연한 빨강은 켜진 `Pin` 만.
+- 시험 `tests/test_text_size.py` 19항목. `test_memo` 의 자동 저장 확인이 시간에 기대 가끔 흔들리던 것을 "저장될 때까지 기다리기"로. 전체 133항목.
+
 ## [01.04] - 2026-11-23
 
 - **[New] 목록 창 `Shrink`** — `A00220_BackupTool` 과 같은 방식. 누르면 목록 창이 **272 x 155** 로 줄고 **아이콘 애니메이션 · `Shrunk` · `Pin`** 만 남는다(Pin 은 Shrunk 아래 칸).

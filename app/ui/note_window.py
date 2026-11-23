@@ -13,7 +13,9 @@
 모든 UI 문자열은 영어 (한국어는 주석만).
 """
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+import re
+
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QAction, QColor, QFont, QKeySequence, QPalette, QShortcut, QTextCharFormat, QTextCursor,
                            QTextListFormat)
 from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox, QSizeGrip, QTextEdit,
@@ -22,6 +24,20 @@ from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QLabel, QMenu,
 from app.core import store as st
 
 DEFAULT_SIZE = QSize(320, 320)
+BASE_PT = 11.0              # 글자 크기 100% (v01.05 - 배율을 곱한다)
+_BODY_SIZE = re.compile(r"(<body\b[^>]*style=\"[^\"]*?)\s*font-size:[^;\"]*;?", re.IGNORECASE)
+
+
+def note_font(zoom):
+    """본문 글꼴. QFont("Segoe UI", 13.2) 는 크기를 정수로 자른다(13) - setPointSizeF 로 소수 크기 (v01.05 시험이 잡음)."""
+    f = QFont("Segoe UI")
+    f.setPointSizeF(BASE_PT * zoom)
+    return f
+
+
+def strip_base_size(html):
+    """HTML <body style> 의 font-size 를 뺀다 - 남아 있으면 setHtml 이 글자마다 그 크기를 박아 배율이 안 먹는다(v01.05 실측)."""
+    return _BODY_SIZE.sub(r"\1", html or "")
 MIN_SIZE = QSize(200, 140)
 PIN_ON = "#FFB3B3"          # 켜진 Pin = 연한 빨강 (JUN 툴들과 같은 표시)
 
@@ -70,6 +86,7 @@ class NoteWindow(QWidget):
     colorChanged = Signal(str, str)
     pinChanged = Signal(str, bool)
     scopeChanged = Signal(str, str)         # v01.01 노트 id, "shared" / "local"
+    zoomChanged = Signal(str, float)        # v01.05 노트 id, 글자 크기 배율
 
     def __init__(self, note):
         super().__init__(None, Qt.Window | Qt.FramelessWindowHint)
@@ -122,9 +139,11 @@ class NoteWindow(QWidget):
         self.editor.setFrameShape(QFrame.NoFrame)
         self.editor.setPlaceholderText("Take a note...")
         self.editor.setAcceptRichText(True)
-        font = QFont("Segoe UI", 11)
-        self.editor.document().setDefaultFont(font)
-        self.editor.setHtml(note["html"]) if note["html"] else self.editor.setPlainText(note["text"])
+        self.zoom = st.clamp_zoom(note.get("zoom", 1.0))
+        self.editor.document().setDefaultFont(note_font(self.zoom))
+        # v01.05 - 저장된 HTML 의 기본 글자 크기를 빼고 읽는다(남겨 두면 글자마다 11pt 로 박혀 크기 조절이 안 먹는다 - 실측)
+        self.editor.setHtml(strip_base_size(note["html"])) if note["html"] else self.editor.setPlainText(note["text"])
+        self.editor.viewport().installEventFilter(self)          # Ctrl + 휠 = 글자 크기
         self.editor.textChanged.connect(self._on_text_changed)
         root.addWidget(self.editor, 1)
 
@@ -149,6 +168,16 @@ class NoteWindow(QWidget):
             self.fmt_buttons[key] = b
             fl.addWidget(b)
         fl.addStretch(1)
+        # v01.05 글자 크기: A- [100%] A+  (Ctrl + 휠 · Ctrl+= / Ctrl+- · Ctrl+0)
+        self.btn_smaller = self._tool("A−", "Smaller text (Ctrl+- or Ctrl + mouse wheel down)")
+        self.btn_smaller.clicked.connect(lambda: self.step_zoom(-1))
+        fl.addWidget(self.btn_smaller)
+        self.btn_zoom = self._tool("100%", "Text size - click for 100% (Ctrl+0)")
+        self.btn_zoom.clicked.connect(lambda: self.set_zoom(1.0))
+        fl.addWidget(self.btn_zoom)
+        self.btn_larger = self._tool("A+", "Larger text (Ctrl+= or Ctrl + mouse wheel up)")
+        self.btn_larger.clicked.connect(lambda: self.step_zoom(1))
+        fl.addWidget(self.btn_larger)
         self.grip = QSizeGrip(self.footer)
         fl.addWidget(self.grip, 0, Qt.AlignBottom | Qt.AlignRight)
         root.addWidget(self.footer)
@@ -157,6 +186,9 @@ class NoteWindow(QWidget):
                          ("Ctrl+Shift+L", "bullet")):
             QShortcut(QKeySequence(seq), self, activated=lambda k=key: self.apply_format(k))
         QShortcut(QKeySequence("Ctrl+N"), self, activated=lambda: self.newNoteRequested.emit(self.note_id))
+        for seq, step in (("Ctrl+=", 1), ("Ctrl++", 1), ("Ctrl+-", -1)):
+            QShortcut(QKeySequence(seq), self, activated=lambda s=step: self.step_zoom(s))
+        QShortcut(QKeySequence("Ctrl+0"), self, activated=lambda: self.set_zoom(1.0))
 
         self._geo_timer = QTimer(self)
         self._geo_timer.setSingleShot(True)
@@ -165,6 +197,7 @@ class NoteWindow(QWidget):
 
         self.set_color(note["color"], emit=False)
         self.set_pinned(note["pinned"], emit=False)
+        self.set_zoom(self.zoom, emit=False)
         self.set_scope(self.scope, emit=False)
         geo = note.get("geometry")
         if geo:
@@ -335,10 +368,33 @@ class NoteWindow(QWidget):
         self.setWindowTitle(self._title())
         self.contentChanged.emit(self.note_id)
 
+    # ---------------------------------------------------------------- 글자 크기 (v01.05)
+    def set_zoom(self, value, emit=True):
+        """본문 글자 크기 배율 (기본 11pt x 배율). 이 PC 의 보기 설정이라 공유 노트 파일은 안 바뀐다."""
+        value = st.clamp_zoom(value)
+        self.zoom = value
+        self.editor.document().setDefaultFont(note_font(value))
+        self.btn_zoom.setText("{0}%".format(int(round(value * 100))))
+        self.btn_smaller.setEnabled(value > st.ZOOM_MIN + 1e-9)
+        self.btn_larger.setEnabled(value < st.ZOOM_MAX - 1e-9)
+        if emit and not self._loading:
+            self.zoomChanged.emit(self.note_id, value)
+
+    def step_zoom(self, steps):
+        self.set_zoom(self.zoom + steps * st.ZOOM_STEP)
+
+    def eventFilter(self, obj, event):
+        if obj is self.editor.viewport() and event.type() == QEvent.Wheel and event.modifiers() & Qt.ControlModifier:
+            dy = event.angleDelta().y()
+            if dy:
+                self.step_zoom(1 if dy > 0 else -1)
+            return True                                          # 스크롤 대신 크기만
+        return super().eventFilter(obj, event)
+
     def content(self):
         """(html, 글자만). 빈 노트는 html 도 비운다."""
         text = self.editor.toPlainText()
-        return (self.editor.toHtml() if text.strip() else ""), text
+        return (strip_base_size(self.editor.toHtml()) if text.strip() else ""), text
 
     def _on_delete(self):
         answer = QMessageBox.question(self, "Delete note", "Delete this note?",

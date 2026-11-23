@@ -17,7 +17,7 @@ v01.01
 
 import time
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QColorDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QRadioButton, QToolButton,
@@ -47,9 +47,9 @@ def when(ts, now=None):
 
 
 class _Card(QFrame):
-    """목록의 노트 하나 - 위쪽 색 띠 + 범위 표시 + 앞부분 3줄 + 오른쪽 위 시각."""
+    """목록의 노트 하나 - 위쪽 색 띠 + 범위 표시 + 앞부분 3줄 + 오른쪽 위 시각. zoom = 목록 글자 배율(v01.05)."""
 
-    def __init__(self, note, parent=None):
+    def __init__(self, note, parent=None, zoom=1.0):
         super().__init__(parent)
         pal = st.palette(note["color"])
         self.setObjectName("card")
@@ -67,19 +67,21 @@ class _Card(QFrame):
         self.lbl_scope.setToolTip("Shared: kept in the GitHub repository (shared/notes).\n"
                                   "This PC: kept only on this computer.")
         f = self.lbl_scope.font()
-        f.setPointSize(7)
+        f.setPointSizeF(7 * zoom)
         self.lbl_scope.setFont(f)
         top.addWidget(self.lbl_scope)
         top.addStretch(1)
         self.lbl_time = QLabel(when(note["modified"]) + ("   📌" if note["pinned"] else ""))
         f = self.lbl_time.font()
-        f.setPointSize(8)
+        f.setPointSizeF(8 * zoom)
         self.lbl_time.setFont(f)
         top.addWidget(self.lbl_time)
         lay.addLayout(top)
         self.lbl_text = QLabel(st.preview(note["text"]) or "(empty note)")
         self.lbl_text.setWordWrap(True)
-        self.lbl_text.setFont(QFont("Segoe UI", 10))
+        tf = QFont("Segoe UI")
+        tf.setPointSizeF(10 * zoom)                          # 정수로 잘리지 않게
+        self.lbl_text.setFont(tf)
         lay.addWidget(self.lbl_text)
 
 
@@ -133,6 +135,7 @@ class ListWindow(QWidget):
         self.btn_shrink = self._tool("Shrink", "Shrink the notes list to a small animated icon "
                                                "(click Shrunk or the icon to open it again)")
         self.btn_shrink.setCheckable(True)
+        self.btn_shrink.setObjectName("shrinkBtn")       # v01.05 켜져도 빨갛지 않게 (사용자) - 아래 스타일
         self.btn_shrink.setFixedSize(72, 28)
         self.btn_shrink.toggled.connect(lambda on: self.set_shrunk(on))
         self.btn_pin = self._tool("Pin", "Keep the notes list on top of other windows")
@@ -181,7 +184,9 @@ class ListWindow(QWidget):
         self.list.setSpacing(4)
         self.list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.list.setToolTip("Click a note to open it. Right-click: open, color, shared / this PC, delete.")
+        self.list.setToolTip("Click a note to open it. Right-click: open, color, shared / this PC, delete.\n"
+                             "Ctrl + mouse wheel: bigger / smaller text.")
+        self.list.viewport().installEventFilter(self)            # v01.05 Ctrl + 휠 = 목록 글자 크기
         self.list.itemClicked.connect(self._on_clicked)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._on_menu)
@@ -249,6 +254,17 @@ class ListWindow(QWidget):
         self.act_custom.triggered.connect(self.pick_custom_color)
         menu.addAction(self.act_custom)
         menu.addSeparator()
+        # v01.05 목록 글자 크기
+        self.act_larger = QAction("Larger text  (Ctrl + wheel)", menu)
+        self.act_larger.triggered.connect(lambda: self.step_text_zoom(1))
+        menu.addAction(self.act_larger)
+        self.act_smaller = QAction("Smaller text", menu)
+        self.act_smaller.triggered.connect(lambda: self.step_text_zoom(-1))
+        menu.addAction(self.act_smaller)
+        self.act_reset_zoom = QAction("Reset text size", menu)
+        self.act_reset_zoom.triggered.connect(lambda: self.set_text_zoom(1.0))
+        menu.addAction(self.act_reset_zoom)
+        menu.addSeparator()
         self.act_reload = QAction("Reload shared notes", menu)
         self.act_reload.setToolTip("Read shared/notes again (after git pull).")
         self.act_reload.triggered.connect(self.reloadRequested.emit)
@@ -292,6 +308,9 @@ class ListWindow(QWidget):
             "#listWindow > QToolButton:hover {{ background: #0000001F; }}"
             "#listWindow > QToolButton:checked {{ background: {pin}; color: #202020; }}"
             "#listWindow > QToolButton::menu-indicator {{ image: none; width: 0; }}"
+            # Shrunk 는 켜져 있어도 연한 빨강이 아니다(사용자) - 평소 버튼과 같은 모양, 마우스를 올리면만 옅게
+            "#listWindow > QToolButton#shrinkBtn:checked {{ background: transparent; color: {text}; }}"
+            "#listWindow > QToolButton#shrinkBtn:checked:hover {{ background: #0000001F; }}"
             "#pushShared {{ color: {text}; background: {field}; border: 1px solid {ring}; border-radius: 3px; "
             "padding: 3px 10px; }}"
             "#pushShared:hover {{ border-color: {text}; }}"
@@ -337,7 +356,7 @@ class ListWindow(QWidget):
         for note in notes:
             item = QListWidgetItem()
             item.setData(Qt.UserRole, note["id"])
-            card = _Card(note)
+            card = _Card(note, zoom=self.text_zoom())
             item.setSizeHint(QSize(100, card.sizeHint().height() + 4))
             self.list.addItem(item)
             self.list.setItemWidget(item, card)
@@ -405,6 +424,30 @@ class ListWindow(QWidget):
         줄여 둔 동안은 줄이기 전 크기를 돌려준다(다시 켜서 펼 때 작은 창이 되지 않게)."""
         w, h = self._full_size if (self.shrunk and self._full_size) else (self.width(), self.height())
         return [self.x(), self.y(), w, h]
+
+    # ---------------------------------------------------------------- 글자 크기 (v01.05)
+    def text_zoom(self):
+        return st.clamp_zoom(self.store.list_view.get("zoom", 1.0))
+
+    def set_text_zoom(self, value, emit=True):
+        value = st.clamp_zoom(value)
+        if value == self.text_zoom() and emit:
+            return
+        self.store.list_view["zoom"] = value
+        self.refresh()
+        if emit:
+            self.viewChanged.emit()
+
+    def step_text_zoom(self, steps):
+        self.set_text_zoom(self.text_zoom() + steps * st.ZOOM_STEP)
+
+    def eventFilter(self, obj, event):
+        if obj is self.list.viewport() and event.type() == QEvent.Wheel and event.modifiers() & Qt.ControlModifier:
+            dy = event.angleDelta().y()
+            if dy:
+                self.step_text_zoom(1 if dy > 0 else -1)
+            return True
+        return super().eventFilter(obj, event)
 
     # ---------------------------------------------------------------- Shrink (v01.04)
     def set_shrunk(self, on, emit=True):
