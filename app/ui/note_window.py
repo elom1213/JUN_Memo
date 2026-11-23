@@ -17,7 +17,7 @@ import re
 
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QAction, QColor, QFont, QKeySequence, QPalette, QShortcut, QTextCharFormat, QTextCursor,
-                           QTextListFormat)
+                           QTextFormat, QTextListFormat)
 from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox, QSizeGrip, QTextEdit,
                                QToolButton, QVBoxLayout, QWidget, QWidgetAction, QGridLayout)
 
@@ -26,6 +26,13 @@ from app.core import store as st
 DEFAULT_SIZE = QSize(320, 320)
 BASE_PT = 11.0              # 글자 크기 100% (v01.05 - 배율을 곱한다)
 _BODY_SIZE = re.compile(r"(<body\b[^>]*style=\"[^\"]*?)\s*font-size:[^;\"]*;?", re.IGNORECASE)
+
+
+SIZE_MIN, SIZE_MAX = -1, 3  # v01.06 고른 글자 크기 단계 (small · medium · large · x-large · xx-large) - 그 밖은 HTML 로 안 남는다
+
+
+def _clamp_size(level):
+    return max(SIZE_MIN, min(SIZE_MAX, int(level)))
 
 
 def note_font(zoom):
@@ -167,12 +174,22 @@ class NoteWindow(QWidget):
             b.clicked.connect(lambda _=False, k=key: self.apply_format(k))
             self.fmt_buttons[key] = b
             fl.addWidget(b)
+        # v01.06 고른 글자만 크기: T- / T+ (작게 · 보통 · 크게 · 더 크게 · 가장 크게 - 노트 전체 배율과 곱해진다)
+        for key, label, tip in (("size_down", "T−", "Selected text smaller (Ctrl+Shift+,)\n"
+                                                    "Nothing selected: the text you type next."),
+                                ("size_up", "T+", "Selected text larger (Ctrl+Shift+.)\n"
+                                                  "Nothing selected: the text you type next.")):
+            b = self._tool(label, tip)
+            b.clicked.connect(lambda _=False, k=key: self.apply_format(k))
+            self.fmt_buttons[key] = b
+            fl.addWidget(b)
         fl.addStretch(1)
         # v01.05 글자 크기: A- [100%] A+  (Ctrl + 휠 · Ctrl+= / Ctrl+- · Ctrl+0)
         self.btn_smaller = self._tool("A−", "Smaller text (Ctrl+- or Ctrl + mouse wheel down)")
         self.btn_smaller.clicked.connect(lambda: self.step_zoom(-1))
         fl.addWidget(self.btn_smaller)
         self.btn_zoom = self._tool("100%", "Text size - click for 100% (Ctrl+0)")
+        self.btn_zoom.setMinimumWidth(40)
         self.btn_zoom.clicked.connect(lambda: self.set_zoom(1.0))
         fl.addWidget(self.btn_zoom)
         self.btn_larger = self._tool("A+", "Larger text (Ctrl+= or Ctrl + mouse wheel up)")
@@ -183,7 +200,8 @@ class NoteWindow(QWidget):
         root.addWidget(self.footer)
 
         for seq, key in (("Ctrl+B", "bold"), ("Ctrl+I", "italic"), ("Ctrl+U", "underline"), ("Ctrl+T", "strike"),
-                         ("Ctrl+Shift+L", "bullet")):
+                         ("Ctrl+Shift+L", "bullet"), ("Ctrl+Shift+,", "size_down"), ("Ctrl+Shift+.", "size_up"),
+                         ("Ctrl+<", "size_down"), ("Ctrl+>", "size_up")):
             QShortcut(QKeySequence(seq), self, activated=lambda k=key: self.apply_format(k))
         QShortcut(QKeySequence("Ctrl+N"), self, activated=lambda: self.newNoteRequested.emit(self.note_id))
         for seq, step in (("Ctrl+=", 1), ("Ctrl++", 1), ("Ctrl+-", -1)):
@@ -276,6 +294,8 @@ class NoteWindow(QWidget):
             "QToolButton:hover {{ background: #0000001F; }}"
             "QToolButton:checked {{ background: {pin}; color: #202020; }}"
             "QToolButton::menu-indicator {{ image: none; width: 0; }}"
+            # v01.06 아래 줄은 버튼이 많아(서식 5 + 고른 글자 크기 2 + 전체 크기 3) 여백을 줄인다 - 100% 가 ... 로 잘렸다
+            "#noteFooter QToolButton {{ padding: 0 3px; min-width: 20px; }}"
             "#scopeTag {{ color: {text}; border: 1px solid {text}; border-radius: 3px; padding: 0 4px; "
             "font-size: 9px; }}".format(pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
         # 팔레트에도 같은 선택 색 - 창이 포커스를 잃었을 때(Inactive)도 선택이 보이게 (스타일시트만으로는 비활성 색이 남는다)
@@ -347,6 +367,9 @@ class NoteWindow(QWidget):
                 cursor.createList(QTextListFormat.ListDisc)
             self.editor.setFocus()
             return
+        if key in ("size_up", "size_down"):
+            self.step_selection_size(1 if key == "size_up" else -1)
+            return
         fmt = QTextCharFormat()
         now = self.editor.currentCharFormat()
         if key == "bold":
@@ -359,6 +382,45 @@ class NoteWindow(QWidget):
             fmt.setFontStrikeOut(not now.fontStrikeOut())
         cursor.mergeCharFormat(fmt)
         self.editor.mergeCurrentCharFormat(fmt)
+        self.editor.setFocus()
+
+    def step_selection_size(self, step):
+        """고른 글자만 한 단계 크게 / 작게 (v01.06, 사용자 요청 - 끌어 고른 글자만).
+
+        크기는 몇 pt 가 아니라 **상대 단계**(QTextFormat.FontSizeAdjustment)로 준다 - 노트 전체 배율(A- / A+)과 곱해져 함께 커진다.
+        단계는 SIZE_MIN ~ SIZE_MAX (작게 · 보통 · 크게 · 더 크게 · 가장 크게) - 그 밖의 값은 HTML 로 저장되지 않는다(실측).
+        고른 범위에 크기가 섞여 있으면 글자 조각마다 한 단계씩(Word 의 글꼴 키우기와 같다). 고른 것이 없으면 이어서 칠 글자.
+        """
+        cursor = self.editor.textCursor()
+        if not cursor.hasSelection():
+            now = self.editor.currentCharFormat().intProperty(QTextFormat.FontSizeAdjustment)
+            fmt = QTextCharFormat()
+            fmt.setProperty(QTextFormat.FontSizeAdjustment, _clamp_size(now + step))
+            self.editor.mergeCurrentCharFormat(fmt)
+            self.editor.setFocus()
+            return
+        start, end = cursor.selectionStart(), cursor.selectionEnd()
+        doc = self.editor.document()
+        runs = []                                   # (시작, 끝, 지금 단계) - 먼저 다 모은 뒤 바꾼다(바꾸는 중 조각이 쪼개진다)
+        block = doc.findBlock(start)
+        while block.isValid() and block.position() <= end:
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                a, b = max(frag.position(), start), min(frag.position() + frag.length(), end)
+                if a < b:
+                    runs.append((a, b, frag.charFormat().intProperty(QTextFormat.FontSizeAdjustment)))
+                it += 1
+            block = block.next()
+        edit = QTextCursor(doc)
+        edit.beginEditBlock()                       # Ctrl+Z 한 번에
+        for a, b, now in runs:
+            edit.setPosition(a)
+            edit.setPosition(b, QTextCursor.KeepAnchor)
+            fmt = QTextCharFormat()
+            fmt.setProperty(QTextFormat.FontSizeAdjustment, _clamp_size(now + step))
+            edit.mergeCharFormat(fmt)
+        edit.endEditBlock()
         self.editor.setFocus()
 
     # ---------------------------------------------------------------- 이벤트

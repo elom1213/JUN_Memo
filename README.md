@@ -5,7 +5,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 
 ![preview](icon/JUN_Memo.png)
 
-- **버전**: `app/config/version.py` (v01.05 — **글자 크기**(노트마다 · 목록) · v01.04 — 목록 창 **Shrink**(움직이는 아이콘) · v01.03 — 끌어 고른 영역이 보이게 · **Push Shared** 버튼 · v01.02 — 범위 라디오 버튼이 잘 보이게 · v01.01 — 목록 창 색 · Pin, 공유(GitHub) / 이 PC 노트, 시작 메뉴 · 작업 표시줄) · 변경 기록 [`CHANGELOG.md`](CHANGELOG.md)
+- **버전**: `app/config/version.py` (v01.06 — **고른 글자만 크기**(T− / T+) · 목록 버튼이 잘 보이게 · v01.05 — **글자 크기**(노트마다 · 목록) · v01.04 — 목록 창 **Shrink**(움직이는 아이콘) · v01.03 — 끌어 고른 영역이 보이게 · **Push Shared** 버튼 · v01.02 — 범위 라디오 버튼이 잘 보이게 · v01.01 — 목록 창 색 · Pin, 공유(GitHub) / 이 PC 노트, 시작 메뉴 · 작업 표시줄) · 변경 기록 [`CHANGELOG.md`](CHANGELOG.md)
 - **필요한 것**: Python 3.9+ · `pip install -r requirements.txt` (PySide6)
 - **실행**: `Run_JUN_Memo.bat` 더블클릭(콘솔 창 없이) 또는 `pythonw launch.py`
 
@@ -52,6 +52,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 | `…` | **색 견본 7개**(Yellow · Green · Pink · Purple · Blue · Gray · Charcoal) · `Custom color...`(아무 색) · **`Shared (GitHub)`** 켜고 끄기 · Notes list · Delete note |
 | 띠 왼쪽 `Shared` / `This PC` | 이 노트의 범위 (3장) |
 | `✕` | 닫기 — 노트는 목록에 남는다. **빈 노트는 닫을 때 지운다** |
+| 아래 `T− T+` (v01.06) | **끌어서 고른 글자만** 한 단계 작게 / 크게 (작게 · 보통 · 크게 · 더 크게 · 가장 크게), Ctrl+Shift+, / Ctrl+Shift+. — 노트 전체 배율과 곱해진다. 고른 것이 없으면 이어서 칠 글자 |
 | 아래 `A− 100% A+` (v01.05) | 글자 크기 60 ~ 300% (Ctrl + 휠 · Ctrl+= / − / 0, 퍼센트 클릭 = 100%). 노트마다 이 PC 에 기억 |
 | 아래 `B I U S •` | 굵게 (Ctrl+B) · 기울임 (Ctrl+I) · 밑줄 (Ctrl+U) · 취소선 (Ctrl+T) · 글머리표 (Ctrl+Shift+L, 다시 누르면 해제) |
 | 오른쪽 아래 ◢ | 끌어서 크기 |
@@ -114,12 +115,12 @@ JUN_Memo/
 ├── app/ui/controller.py   # 목록 · 노트 창 · 저장 잇기 (자동 저장, 빈 노트 지우기, 다시 열기)
 ├── icon/JUN_Memo.ico · .png
 ├── shared/notes/          # 공유 노트 (<id>.json, git 으로 올라간다)
-└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
+└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
 ```
 
 ## 6. 시험
 
-`python tests/test_memo.py` · `python tests/test_scope_list.py` — **44 + 31 + 20 + 19 + 19항목**(`test_push_shared.py` 는 실제 git 으로, 임시 원격 + 클론 둘). 공유 폴더는 시험 동안 임시 폴더(`JUN_MEMO_SHARED`). test_memo(오프스크린 PySide6): 저장소(내용 · 순서 · 검색 · 저장/다시 읽기 · 깨진 파일 → 백업 · 팔레트),
+`python tests/test_memo.py` · `python tests/test_scope_list.py` — **44 + 31 + 20 + 19 + 19 + 17항목**(`test_push_shared.py` 는 실제 git 으로, 임시 원격 + 클론 둘). 공유 폴더는 시험 동안 임시 폴더(`JUN_MEMO_SHARED`). test_memo(오프스크린 PySide6): 저장소(내용 · 순서 · 검색 · 저장/다시 읽기 · 깨진 파일 → 백업 · 팔레트),
 노트 창(자리 · 색 · Pin 플래그 · 굵게 · 글머리표 켜고 끄기 · 붙여 넣기 글자만), 앱 흐름(새 노트 · 자동 저장 · 빈 노트 지움 · 닫아도 목록에 남음 ·
 목록 클릭 = 그대로 다시 열기 · 검색 · 색 바꾸기 · 다시 켜면 다시 열림 · 화면 밖 자리 → 주 화면 · 삭제), 한 번만 실행.
 

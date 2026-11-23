@@ -139,6 +139,7 @@ class ListWindow(QWidget):
         self.btn_shrink.setFixedSize(72, 28)
         self.btn_shrink.toggled.connect(lambda on: self.set_shrunk(on))
         self.btn_pin = self._tool("Pin", "Keep the notes list on top of other windows")
+        self.btn_pin.setObjectName("pinBtn")
         self.btn_pin.setCheckable(True)
         self.btn_pin.setFixedSize(72, 28)
         self.btn_pin.toggled.connect(lambda on: self.set_pinned(on))
@@ -309,8 +310,14 @@ class ListWindow(QWidget):
             "#listWindow > QToolButton:checked {{ background: {pin}; color: #202020; }}"
             "#listWindow > QToolButton::menu-indicator {{ image: none; width: 0; }}"
             # Shrunk 는 켜져 있어도 연한 빨강이 아니다(사용자) - 평소 버튼과 같은 모양, 마우스를 올리면만 옅게
-            "#listWindow > QToolButton#shrinkBtn:checked {{ background: transparent; color: {text}; }}"
-            "#listWindow > QToolButton#shrinkBtn:checked:hover {{ background: #0000001F; }}"
+            # v01.06 Shrink · Pin 은 배경과 구분되는 버튼 모양 (목록 색과 같아 안 보이는 때가 있었다 - 사용자).
+            #        입력칸과 같은 바탕 + 테두리. Shrunk 는 켜져도 빨갛지 않고 테두리만 진하게, 켜진 Pin 만 연한 빨강.
+            "#listWindow > QToolButton#shrinkBtn, #listWindow > QToolButton#pinBtn {{ background: {field}; color: {text}; "
+            "border: 1px solid {ring}; border-radius: 4px; }}"
+            "#listWindow > QToolButton#shrinkBtn:hover, #listWindow > QToolButton#pinBtn:hover {{ border-color: {text}; }}"
+            "#listWindow > QToolButton#shrinkBtn:checked {{ background: {field}; color: {text}; border: 2px solid {text}; "
+            "font-weight: bold; }}"
+            "#listWindow > QToolButton#pinBtn:checked {{ background: {pin}; color: #202020; border: 1px solid {ring}; }}"
             "#pushShared {{ color: {text}; background: {field}; border: 1px solid {ring}; border-radius: 3px; "
             "padding: 3px 10px; }}"
             "#pushShared:hover {{ border-color: {text}; }}"

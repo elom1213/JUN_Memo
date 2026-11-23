@@ -131,7 +131,7 @@ try:
     lw.set_pinned(True)
     app.processEvents()
     check("Shrunk button is not light red when on (Pin still is)",
-          lw.btn_shrink.objectName() == "shrinkBtn" and "QToolButton#shrinkBtn:checked { background: transparent;" in ss and
+          lw.btn_shrink.objectName() == "shrinkBtn" and "QToolButton#shrinkBtn:checked { background: #FFFFFF;" in ss and
           "QToolButton:checked { background: #FFB3B3" in ss and lw.btn_shrink.isChecked() and lw.btn_pin.isChecked())
     img = lw.btn_shrink.grab().toImage()
     px = img.pixelColor(3, img.height() // 2)
