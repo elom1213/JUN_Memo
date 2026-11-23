@@ -138,6 +138,10 @@ try:
           lw.color == st.DEFAULT_LIST_COLOR and "#listWindow { background: #F3F2F1" in lw.styleSheet() and
           "#search { background: #FFFFFF; color: #202020" in lw.styleSheet() and
           "#listWindow QLabel, #listWindow QRadioButton { color: #202020" in lw.styleSheet())
+    ss = lw.styleSheet()
+    check("list: radio buttons draw their own circle - empty when off, a dot when on (v01.02)",
+          "QRadioButton::indicator {" in ss and "QRadioButton::indicator:checked" in ss and "qradialgradient" in ss and
+          "QRadioButton:checked { font-weight: bold; }" in ss)
     lw.swatches["Charcoal"].click()
     check("list: picking Charcoal paints it dark with white text (the search box too)",
           "#listWindow { background: #696969" in lw.styleSheet() and "color: #FFFFFF" in lw.styleSheet() and

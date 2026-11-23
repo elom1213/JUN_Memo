@@ -5,7 +5,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 
 ![preview](icon/JUN_Memo.png)
 
-- **버전**: `app/config/version.py` (v01.01 — 목록 창 색 · Pin, 공유(GitHub) / 이 PC 노트, 시작 메뉴 · 작업 표시줄) · 변경 기록 [`CHANGELOG.md`](CHANGELOG.md)
+- **버전**: `app/config/version.py` (v01.02 — 범위 라디오 버튼이 잘 보이게 · v01.01 — 목록 창 색 · Pin, 공유(GitHub) / 이 PC 노트, 시작 메뉴 · 작업 표시줄) · 변경 기록 [`CHANGELOG.md`](CHANGELOG.md)
 - **필요한 것**: Python 3.9+ · `pip install -r requirements.txt` (PySide6)
 - **실행**: `Run_JUN_Memo.bat` 더블클릭(콘솔 창 없이) 또는 `pythonw launch.py`
 
@@ -32,7 +32,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 - **`Pin`** — 목록 창을 늘 맨 위에(켜지면 `Pinned` · 연한 빨강).
 - **`…`** — 목록 창 **색**(7색 견본 · `Custom list color...`) · `Reload shared notes` · **`Add to Start Menu`** · `Pin to Taskbar` (4장).
   목록 창은 모든 부분(배경 · 글자 · 검색칸)을 고른 색으로 칠한다 — 윈도우 다크 모드에서도 글자가 보인다. 색 · Pin · 자리는 기억.
-- **All / Shared / This PC** — 범위로 거르기(3장). 카드 왼쪽 위에 범위 표시.
+- **All / Shared / This PC** — 범위로 거르기(3장). 고른 것은 원 안에 점 · 굵은 글자. 카드 왼쪽 위에 범위 표시.
 - **Search** — 적은 낱말이 **모두** 들어 있는 노트만(대소문자 무시).
 - 카드 = 노트의 색 · 앞부분 3줄 · 마지막으로 고친 시각(오늘이면 시:분), 📌 = Pin.
 - **카드를 클릭하면 그 노트가 스티커 창으로 열린다.** 이미 열려 있으면 앞으로 나온다.

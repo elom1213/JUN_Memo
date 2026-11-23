@@ -226,10 +226,21 @@ class ListWindow(QWidget):
         """창 색. 모든 부분을 같은 팔레트로 칠한다 (다크 모드의 흰 글자가 밝은 배경에 묻히지 않게)."""
         pal = st.palette(color)
         self.color = color
-        field = "#FFFFFF" if pal["text"] != "#FFFFFF" else "#4A4A4A"
+        dark = pal["text"] == "#FFFFFF"
+        field = "#4A4A4A" if dark else "#FFFFFF"
+        ring = "#C8C8C8" if dark else "#7A7A7A"          # 안 고른 라디오 테두리 (글자보다 조금 옅게)
         self.setStyleSheet(
             "#listWindow {{ background: {body}; }}"
             "#listWindow QLabel, #listWindow QRadioButton {{ color: {text}; background: transparent; }}"
+            # v01.02 - 라디오 동그라미를 직접 그린다. 창을 통째로 칠하면 다크 모드 스타일의 동그라미가 안 보였다(사용자).
+            #          안 고름 = 빈 원, 고름 = 원 안에 진한 점 + 굵은 글자.
+            "#listWindow QRadioButton {{ spacing: 6px; padding: 2px 4px; }}"
+            "#listWindow QRadioButton::indicator {{ width: 12px; height: 12px; border-radius: 8px; "
+            "border: 2px solid {ring}; background: {field}; }}"
+            "#listWindow QRadioButton::indicator:hover {{ border-color: {text}; }}"
+            "#listWindow QRadioButton::indicator:checked {{ border-color: {text}; background: qradialgradient("
+            "cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {text}, stop:0.5 {text}, stop:0.56 {field}, stop:1 {field}); }}"
+            "#listWindow QRadioButton:checked {{ font-weight: bold; }}"
             "#search {{ background: {field}; color: {text}; border: 1px solid {header}; border-radius: 3px; "
             "padding: 3px 6px; selection-background-color: #00000040; }}"
             "#notes {{ background: transparent; border: none; }}"
@@ -239,7 +250,7 @@ class ListWindow(QWidget):
             "#listWindow > QToolButton:hover {{ background: #0000001F; }}"
             "#listWindow > QToolButton:checked {{ background: {pin}; color: #202020; }}"
             "#listWindow > QToolButton::menu-indicator {{ image: none; width: 0; }}"
-            "#count {{ color: {text}; }}".format(field=field, pin=PIN_ON, **pal))
+            "#count {{ color: {text}; }}".format(field=field, ring=ring, pin=PIN_ON, **pal))
         if emit:
             self.store.list_view["color"] = color
             self.viewChanged.emit()

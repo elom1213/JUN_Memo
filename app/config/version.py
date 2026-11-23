@@ -10,7 +10,10 @@
 #        This PC(%APPDATA%) - 공유 파일엔 내용만, 창 자리 · Pin · 열림은 이 PC 의 state.json · Reload shared notes ·
 #        시작 메뉴 추가 · 작업 표시줄 고정(0110_JUN_Video_Tool 의 shell_integration 을 옮겨 맞춤). v01.00 notes.json 이어 읽기.
 
-VERSION = "01.01"
+# 01.02  (2026-11-23) 목록 창의 All / Shared / This PC 라디오 버튼이 안 보이던 것 - 창을 통째로 칠하며 다크 모드 스타일의
+#        동그라미가 묻혔다. 동그라미를 직접 그린다: 안 고름 = 빈 원, 고름 = 원 안의 점 + 굵은 글자, 창 색을 따른다.
+
+VERSION = "01.02"
 APP_NAME = "JUN Memo"
 APP_USER_MODEL_ID = "JUN.Memo"
 LAST_UPDATE = "2026-11-23"
