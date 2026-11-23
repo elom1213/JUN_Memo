@@ -54,15 +54,19 @@ class _Card(QFrame):
         pal = st.palette(note["color"])
         self.setObjectName("card")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        scope_color = st.SCOPE_COLORS[note["scope"]]
+        # v01.07 카드 왼쪽 띠 + 배지 = 범위 색 (Shared 파랑 / This PC 초록) - 목록을 훑어볼 때 바로 구분된다
         self.setStyleSheet(
-            "#card {{ background: {body}; border-top: 5px solid {header}; border-radius: 2px; }}"
+            "#card {{ background: {body}; border-top: 5px solid {header}; border-left: 5px solid {scope}; "
+            "border-radius: 2px; }}"
             "QLabel {{ color: {text}; background: transparent; }}"
-            "#scopeTag {{ border: 1px solid {text}; border-radius: 3px; padding: 0 4px; }}".format(**pal))
+            "#scopeTag {{ background: {scope}; color: #FFFFFF; border: none; border-radius: 3px; padding: 0 5px; "
+            "font-weight: bold; }}".format(scope=scope_color, **pal))
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 6, 10, 8)
         lay.setSpacing(2)
         top = QHBoxLayout()
-        self.lbl_scope = QLabel(SCOPE_LABEL[note["scope"]])
+        self.lbl_scope = QLabel(st.SCOPE_TEXT[note["scope"]])
         self.lbl_scope.setObjectName("scopeTag")
         self.lbl_scope.setToolTip("Shared: kept in the GitHub repository (shared/notes).\n"
                                   "This PC: kept only on this computer.")
@@ -318,10 +322,11 @@ class ListWindow(QWidget):
             "#listWindow > QToolButton#shrinkBtn:checked {{ background: {field}; color: {text}; border: 2px solid {text}; "
             "font-weight: bold; }}"
             "#listWindow > QToolButton#pinBtn:checked {{ background: {pin}; color: #202020; border: 1px solid {ring}; }}"
-            "#pushShared {{ color: {text}; background: {field}; border: 1px solid {ring}; border-radius: 3px; "
+            # v01.07 '#listWindow > QToolButton'(투명)이 더 구체적이라 Push Shared 테두리가 안 보였다 → 같은 구체성으로
+            "#listWindow > QToolButton#pushShared {{ color: {text}; background: {field}; border: 1px solid {ring}; border-radius: 3px; "
             "padding: 3px 10px; }}"
-            "#pushShared:hover {{ border-color: {text}; }}"
-            "#pushShared:disabled {{ color: {ring}; }}"
+            "#listWindow > QToolButton#pushShared:hover {{ border-color: {text}; }}"
+            "#listWindow > QToolButton#pushShared:disabled {{ color: {ring}; }}"
             "#count {{ color: {text}; }}".format(field=field, ring=ring, pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
         if emit:
             self.store.list_view["color"] = color

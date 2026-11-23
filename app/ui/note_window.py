@@ -296,8 +296,8 @@ class NoteWindow(QWidget):
             "QToolButton::menu-indicator {{ image: none; width: 0; }}"
             # v01.06 아래 줄은 버튼이 많아(서식 5 + 고른 글자 크기 2 + 전체 크기 3) 여백을 줄인다 - 100% 가 ... 로 잘렸다
             "#noteFooter QToolButton {{ padding: 0 3px; min-width: 20px; }}"
-            "#scopeTag {{ color: {text}; border: 1px solid {text}; border-radius: 3px; padding: 0 4px; "
-            "font-size: 9px; }}".format(pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
+            .format(pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
+        # 범위 배지는 범위 색으로 따로 칠한다 (v01.07 - set_scope)
         # 팔레트에도 같은 선택 색 - 창이 포커스를 잃었을 때(Inactive)도 선택이 보이게 (스타일시트만으로는 비활성 색이 남는다)
         qp = self.editor.palette()
         for group in (QPalette.Active, QPalette.Inactive):
@@ -310,7 +310,11 @@ class NoteWindow(QWidget):
     def set_scope(self, scope, emit=True):
         """Shared (GitHub) / This PC - 표시와 메뉴 체크."""
         self.scope = scope if scope in st.SCOPES else st.SCOPE_LOCAL
-        self.lbl_scope.setText("Shared" if self.scope == st.SCOPE_SHARED else "This PC")
+        self.lbl_scope.setText(st.SCOPE_TEXT[self.scope])
+        # v01.07 Shared = 파랑, This PC = 초록 배지 (사용자: 노트마다 색으로 구분되게)
+        self.lbl_scope.setStyleSheet(
+            "QLabel {{ background: {0}; color: #FFFFFF; border: none; border-radius: 3px; padding: 0 6px; "
+            "font-size: 9px; font-weight: bold; }}".format(st.SCOPE_COLORS[self.scope]))
         self.act_shared.setChecked(self.scope == st.SCOPE_SHARED)
         if emit and not self._loading:
             self.scopeChanged.emit(self.note_id, self.scope)

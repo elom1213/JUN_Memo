@@ -49,6 +49,9 @@ COLORS = {
     "Charcoal": {"body": "#696969", "header": "#616161", "text": "#FFFFFF"},
 }
 DEFAULT_COLOR = "Yellow"
+#: v01.07 범위 배지 색 (꽉 찬 바탕 + 흰 글자 - 노트 7색 · 차콜 어디서나 보인다). Shared = 파랑, This PC = 초록.
+SCOPE_COLORS = {"shared": "#1A73E8", "local": "#2E7D32"}
+SCOPE_TEXT = {"shared": "Shared", "local": "This PC"}
 DEFAULT_LIST_COLOR = "Gray"
 CONTENT_KEYS = ("id", "html", "text", "color", "created", "modified")
 VIEW_KEYS = ("open", "pinned", "geometry", "zoom")

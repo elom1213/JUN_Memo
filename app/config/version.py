@@ -29,7 +29,10 @@
 #        섞인 크기는 조각마다 한 단계, Ctrl+Z 한 번, 고른 것 없으면 이어서 칠 글자. 노트 전체 배율(A- / A+)은 그대로.
 #        목록 창 Shrink · Pin 을 배경과 구분되는 버튼으로(바탕 + 테두리, Shrunk 는 굵은 테두리 - 빨강 아님). 아래 줄 여백을 줄여 100% 가 잘리지 않게.
 
-VERSION = "01.06"
+# 01.07  (2026-11-23) Shared / This PC 를 색으로 구분 - 노트 위쪽 · 목록 카드의 배지를 꽉 찬 범위 색(Shared 파랑 #1A73E8,
+#        This PC 초록 #2E7D32, 흰 글자)으로, 목록 카드 왼쪽에 같은 색 띠. Push Shared 버튼 테두리가 안 보이던 것(선택자 구체성).
+
+VERSION = "01.07"
 APP_NAME = "JUN Memo"
 APP_USER_MODEL_ID = "JUN.Memo"
 LAST_UPDATE = "2026-11-23"
