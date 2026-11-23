@@ -5,16 +5,27 @@
 """
 노트 하나 = dict:
     id        : 고유 문자열 (uuid4 hex)
+    scope     : "local" (이 PC 에서만) / "shared" (GitHub 로 공유 - 저장소 안 shared 폴더)
     html      : 본문 (QTextEdit HTML)
     text      : 본문 글자만 (목록 미리보기 · 검색)
     color     : 색 이름(COLORS 키) 또는 "#rrggbb" (사용자 색)
-    pinned    : 늘 맨 위 (Pin)
-    open      : 창이 열려 있었나 (다시 켜면 그 노트들을 다시 연다 - 윈도우 스티커 메모처럼)
-    geometry  : [x, y, w, h] 마지막 창 위치 · 크기 (없으면 None)
+    pinned    : 늘 맨 위 (Pin)                     ┐
+    open      : 창이 열려 있었나                    ├ "보기 상태" - PC 마다 다르다
+    geometry  : [x, y, w, h] 마지막 창 위치 · 크기 ┘
     created / modified : epoch 초
 
-저장 파일은 json 하나(`%APPDATA%/JUN_Memo/notes.json`). 쓰기는 임시 파일 → os.replace 로 한 번에(쓰다 꺼져도 깨지지 않게),
-직전 파일은 notes.json.bak 으로 하나 남긴다.
+저장 위치 (v01.01 - 공유 / 이 PC 구분)
+--------------------------------------
+    local_dir (%APPDATA%/JUN_Memo)
+        notes.json   : 이 PC 노트의 내용 (id · html · text · color · created · modified)
+        state.json   : 보기 상태 - 노트마다 {open, pinned, geometry} (공유 노트 것도 여기), 목록 창 {color, pinned, geometry}
+    shared_dir (저장소 안 shared/notes)
+        <id>.json    : 공유 노트 하나 = 파일 하나 (내용만). 두 PC 가 **다른** 노트를 고치면 git 에서 충돌하지 않는다.
+                       창을 옮기거나 Pin 해도 이 파일은 안 바뀐다(보기 상태는 state.json) - 공유 파일이 쓸데없이 바뀌지 않게.
+
+v01.00 의 notes.json(보기 상태까지 한 파일)은 그대로 읽어 state.json 으로 나눈다.
+쓰기는 임시 파일 → os.replace 로 한 번에(쓰다 꺼져도 깨지지 않게), notes.json · state.json 은 직전 파일을 .bak 으로 하나 남긴다.
+공유 노트 파일은 **바뀐 것만** 다시 쓴다(git 에 안 바뀐 파일이 바뀐 것으로 보이지 않게).
 """
 
 import json
@@ -22,7 +33,10 @@ import os
 import time
 import uuid
 
-FILE_VERSION = 1
+FILE_VERSION = 2
+SCOPE_LOCAL = "local"
+SCOPE_SHARED = "shared"
+SCOPES = (SCOPE_LOCAL, SCOPE_SHARED)
 
 #: 윈도우 스티커 메모와 같은 색 (본문, 위쪽 띠, 글자). 순서 = 메뉴 순서.
 COLORS = {
@@ -35,11 +49,23 @@ COLORS = {
     "Charcoal": {"body": "#696969", "header": "#616161", "text": "#FFFFFF"},
 }
 DEFAULT_COLOR = "Yellow"
+DEFAULT_LIST_COLOR = "Gray"
+CONTENT_KEYS = ("id", "html", "text", "color", "created", "modified")
+VIEW_KEYS = ("open", "pinned", "geometry")
 
 
-def default_path():
+def default_local_dir():
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
-    return os.path.join(base, "JUN_Memo", "notes.json")
+    return os.path.join(base, "JUN_Memo")
+
+
+def default_shared_dir():
+    """저장소 안 shared/notes (이 파일 기준 ../../shared/notes). 환경 변수 JUN_MEMO_SHARED 가 있으면 그것."""
+    env = os.environ.get("JUN_MEMO_SHARED")
+    if env:
+        return env
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(root, "shared", "notes")
 
 
 # ---------------------------------------------------------------------- 색
@@ -62,6 +88,10 @@ def is_hex(color):
         return False
 
 
+def is_color(color):
+    return color in COLORS or is_hex(color)
+
+
 def palette(color):
     """색 이름 또는 "#rrggbb" → {"body", "header", "text"}. 사용자 색은 띠를 조금 어둡게, 글자는 밝기로 검정 / 흰색."""
     if color in COLORS:
@@ -74,89 +104,186 @@ def palette(color):
     return {"body": color.upper(), "header": header, "text": "#202020" if luminance > 140 else "#FFFFFF"}
 
 
+# ---------------------------------------------------------------------- 파일
+def _read_json(path):
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _write_json(path, data, backup=False):
+    folder = os.path.dirname(path)
+    if folder and not os.path.isdir(folder):
+        os.makedirs(folder)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=1, sort_keys=True)
+        fh.write("\n")
+    if backup and os.path.isfile(path):
+        try:
+            os.replace(path, path + ".bak")
+        except OSError:
+            pass
+    os.replace(tmp, path)
+
+
 # ---------------------------------------------------------------------- 저장소
 class NoteStore(object):
 
-    def __init__(self, path=None):
-        self.path = path or default_path()
+    def __init__(self, local_dir=None, shared_dir=None):
+        """local_dir 에 notes.json · state.json, shared_dir 에 공유 노트 <id>.json.
+        (v01.00 호환: local_dir 자리에 notes.json 파일 경로를 주면 그 폴더로 본다.)"""
+        local_dir = local_dir or default_local_dir()
+        if local_dir.lower().endswith(".json"):
+            local_dir = os.path.dirname(local_dir)
+        self.local_dir = local_dir
+        self.shared_dir = shared_dir or default_shared_dir()
         self.notes = {}             # id -> note
+        self.list_view = {"color": DEFAULT_LIST_COLOR, "pinned": False, "geometry": None}
         self.error = ""             # 마지막 읽기 / 쓰기 문제 (UI 가 로그로 보여 준다)
+        self._shared_written = {}   # id -> 마지막으로 쓰거나 읽은 공유 파일 내용 (바뀐 것만 쓰기)
         self.load()
 
-    # ---------------------------------------------------------------- 파일
+    @property
+    def notes_path(self):
+        return os.path.join(self.local_dir, "notes.json")
+
+    @property
+    def state_path(self):
+        return os.path.join(self.local_dir, "state.json")
+
+    def shared_path(self, note_id):
+        return os.path.join(self.shared_dir, note_id + ".json")
+
+    # ---------------------------------------------------------------- 읽기
+    def _read_with_backup(self, path):
+        if not os.path.isfile(path):
+            return None
+        try:
+            return _read_json(path)
+        except (OSError, ValueError) as exc:
+            msg = "Could not read {0}: {1}".format(path, exc)
+            if os.path.isfile(path + ".bak"):
+                try:
+                    data = _read_json(path + ".bak")
+                    self.error = msg + " - loaded the backup instead."
+                    return data
+                except (OSError, ValueError):
+                    pass
+            self.error = msg
+            return None
+
     def load(self):
         self.notes = {}
-        if not os.path.isfile(self.path):
-            return
-        try:
-            with open(self.path, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-        except (OSError, ValueError) as exc:
-            self.error = "Could not read {0}: {1}".format(self.path, exc)
-            backup = self.path + ".bak"
-            if os.path.isfile(backup):                      # 깨졌으면 직전 파일로
-                try:
-                    with open(backup, "r", encoding="utf-8") as fh:
-                        data = json.load(fh)
-                    self.error += " - loaded the backup instead."
-                except (OSError, ValueError):
-                    return
-            else:
-                return
+        self._shared_written = {}
+        self.error = ""
+        data = self._read_with_backup(self.notes_path) or {}
+        view_from_old = {}
         for raw in data.get("notes", []):
-            note = self._normalize(raw)
+            note = self._normalize(raw, SCOPE_LOCAL)
             if note is not None:
                 self.notes[note["id"]] = note
-
-    def save(self):
-        folder = os.path.dirname(self.path)
-        if folder and not os.path.isdir(folder):
-            os.makedirs(folder)
-        data = {"version": FILE_VERSION, "notes": sorted(self.notes.values(), key=lambda n: n["created"])}
-        tmp = self.path + ".tmp"
-        try:
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, ensure_ascii=False, indent=1)
-            if os.path.isfile(self.path):
+                if any(k in raw for k in VIEW_KEYS):        # v01.00 파일 - 보기 상태도 같이 있었다
+                    view_from_old[note["id"]] = {k: note[k] for k in VIEW_KEYS}
+        if os.path.isdir(self.shared_dir):
+            for name in sorted(os.listdir(self.shared_dir)):
+                if not name.endswith(".json"):
+                    continue
+                path = os.path.join(self.shared_dir, name)
                 try:
-                    os.replace(self.path, self.path + ".bak")
-                except OSError:
-                    pass
-            os.replace(tmp, self.path)
-            self.error = ""
-            return True
-        except OSError as exc:
-            self.error = "Could not save {0}: {1}".format(self.path, exc)
-            return False
+                    raw = _read_json(path)
+                except (OSError, ValueError) as exc:
+                    self.error = "Could not read the shared note {0}: {1}".format(name, exc)
+                    continue
+                note = self._normalize(raw, SCOPE_SHARED)
+                if note is None:
+                    continue
+                if note["id"] in self.notes:                # 같은 id 가 둘 - 공유 쪽을 쓴다
+                    self.notes.pop(note["id"])
+                self.notes[note["id"]] = note
+                self._shared_written[note["id"]] = self._shared_payload(note)
+        state = self._read_with_backup(self.state_path) or {}
+        views = state.get("notes", {}) if isinstance(state.get("notes"), dict) else {}
+        for note_id, note in self.notes.items():
+            view = views.get(note_id) or view_from_old.get(note_id) or {}
+            note["open"] = bool(view.get("open", False))
+            note["pinned"] = bool(view.get("pinned", False))
+            geo = view.get("geometry")
+            note["geometry"] = [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None
+        lv = state.get("list") if isinstance(state.get("list"), dict) else {}
+        geo = lv.get("geometry")
+        self.list_view = {"color": lv.get("color") if is_color(lv.get("color")) else DEFAULT_LIST_COLOR,
+                          "pinned": bool(lv.get("pinned", False)),
+                          "geometry": [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None}
 
     @staticmethod
-    def _normalize(raw):
+    def _normalize(raw, scope):
         if not isinstance(raw, dict) or not raw.get("id"):
             return None
         now = time.time()
         geo = raw.get("geometry")
-        if not (isinstance(geo, (list, tuple)) and len(geo) == 4):
-            geo = None
         color = raw.get("color") or DEFAULT_COLOR
-        if color not in COLORS and not is_hex(color):
-            color = DEFAULT_COLOR
         return {
             "id": str(raw["id"]),
+            "scope": scope,
             "html": str(raw.get("html") or ""),
             "text": str(raw.get("text") or ""),
-            "color": color,
+            "color": color if is_color(color) else DEFAULT_COLOR,
             "pinned": bool(raw.get("pinned", False)),
             "open": bool(raw.get("open", False)),
-            "geometry": [int(v) for v in geo] if geo else None,
+            "geometry": [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None,
             "created": float(raw.get("created") or now),
             "modified": float(raw.get("modified") or raw.get("created") or now),
         }
 
+    @staticmethod
+    def _shared_payload(note):
+        return {k: note[k] for k in CONTENT_KEYS}
+
+    # ---------------------------------------------------------------- 쓰기
+    def save(self):
+        """이 PC 노트 · 보기 상태 · 바뀐 공유 노트를 쓴다. 성공하면 True (실패는 self.error)."""
+        ok = True
+        try:
+            local = [self._shared_payload(n) for n in sorted(self.notes.values(), key=lambda n: n["created"])
+                     if n["scope"] == SCOPE_LOCAL]
+            _write_json(self.notes_path, {"version": FILE_VERSION, "notes": local}, backup=True)
+            views = {i: {k: n[k] for k in VIEW_KEYS} for i, n in self.notes.items()}
+            _write_json(self.state_path, {"version": FILE_VERSION, "notes": views, "list": dict(self.list_view)},
+                        backup=True)
+        except OSError as exc:
+            self.error = "Could not save in {0}: {1}".format(self.local_dir, exc)
+            ok = False
+        for note_id, note in self.notes.items():
+            if note["scope"] != SCOPE_SHARED:
+                continue
+            payload = self._shared_payload(note)
+            if self._shared_written.get(note_id) == payload:
+                continue                                    # 안 바뀐 공유 파일은 건드리지 않는다
+            try:
+                _write_json(self.shared_path(note_id), payload)
+                self._shared_written[note_id] = payload
+            except OSError as exc:
+                self.error = "Could not save the shared note {0}: {1}".format(note_id, exc)
+                ok = False
+        for note_id in [i for i in self._shared_written if i not in self.notes or
+                        self.notes[i]["scope"] != SCOPE_SHARED]:
+            try:                                            # 지웠거나 이 PC 로 옮긴 공유 노트 = 파일 지우기
+                if os.path.isfile(self.shared_path(note_id)):
+                    os.remove(self.shared_path(note_id))
+                self._shared_written.pop(note_id, None)
+            except OSError as exc:
+                self.error = "Could not remove the shared note {0}: {1}".format(note_id, exc)
+                ok = False
+        if ok:
+            self.error = ""
+        return ok
+
     # ---------------------------------------------------------------- 노트
-    def new_note(self, color=None, geometry=None):
+    def new_note(self, color=None, geometry=None, scope=SCOPE_LOCAL):
         now = time.time()
-        note = {"id": uuid.uuid4().hex, "html": "", "text": "", "color": color or DEFAULT_COLOR, "pinned": False,
-                "open": True, "geometry": list(geometry) if geometry else None, "created": now, "modified": now}
+        note = {"id": uuid.uuid4().hex, "scope": scope if scope in SCOPES else SCOPE_LOCAL, "html": "", "text": "",
+                "color": color or DEFAULT_COLOR, "pinned": False, "open": True,
+                "geometry": list(geometry) if geometry else None, "created": now, "modified": now}
         self.notes[note["id"]] = note
         return note
 
@@ -173,16 +300,18 @@ class NoteStore(object):
         return True
 
     def update(self, note_id, **fields):
-        """색 · 핀 · 열림 · 위치 같은 것 (modified 는 안 올린다 - 목록 순서는 내용을 고친 시각)."""
+        """색 · 핀 · 열림 · 위치 · 범위 (modified 는 안 올린다 - 목록 순서는 내용을 고친 시각)."""
         note = self.notes.get(note_id)
         if note is None:
             return False
         changed = False
         for key, value in fields.items():
-            if key not in ("color", "pinned", "open", "geometry"):
+            if key not in ("color", "pinned", "open", "geometry", "scope"):
                 raise KeyError(key)
             if key == "geometry" and value is not None:
                 value = [int(v) for v in value]
+            if key == "scope" and value not in SCOPES:
+                raise ValueError(value)
             if note.get(key) != value:
                 note[key] = value
                 changed = True
@@ -195,11 +324,44 @@ class NoteStore(object):
         note = self.notes.get(note_id)
         return note is not None and not note["text"].strip()
 
-    def ordered(self, query=""):
-        """목록 순서: 최근에 고친 것이 위. query 는 공백으로 나눈 낱말이 모두 들어 있어야(대소문자 무시)."""
+    def ordered(self, query="", scope=None):
+        """목록 순서: 최근에 고친 것이 위. query = 공백으로 나눈 낱말이 모두(대소문자 무시). scope = None(전부) / local / shared."""
         words = [w.lower() for w in (query or "").split() if w]
-        out = [n for n in self.notes.values() if all(w in n["text"].lower() for w in words)]
+        out = [n for n in self.notes.values() if all(w in n["text"].lower() for w in words) and
+               (scope is None or n["scope"] == scope)]
         return sorted(out, key=lambda n: n["modified"], reverse=True)
+
+    def reload_shared(self):
+        """공유 폴더를 다시 읽는다 (git pull 뒤). 열린 창이 없는 공유 노트만 바뀐다 - 고치는 중인 노트는 건드리지 않는다.
+        돌려주는 값: (새로 생긴 수, 바뀐 수, 없어진 수)."""
+        on_disk = {}
+        if os.path.isdir(self.shared_dir):
+            for name in os.listdir(self.shared_dir):
+                if name.endswith(".json"):
+                    try:
+                        note = self._normalize(_read_json(os.path.join(self.shared_dir, name)), SCOPE_SHARED)
+                    except (OSError, ValueError):
+                        continue
+                    if note is not None:
+                        on_disk[note["id"]] = note
+        added = changed = removed = 0
+        for note_id, fresh in on_disk.items():
+            cur = self.notes.get(note_id)
+            payload = self._shared_payload(fresh)
+            if cur is None:
+                self.notes[note_id] = fresh
+                added += 1
+            elif cur["scope"] == SCOPE_SHARED and not cur["open"] and self._shared_payload(cur) != payload:
+                for k in CONTENT_KEYS:
+                    cur[k] = fresh[k]
+                changed += 1
+            self._shared_written[note_id] = payload
+        for note_id in [i for i, n in self.notes.items() if n["scope"] == SCOPE_SHARED and i not in on_disk
+                        and not n["open"]]:
+            self.notes.pop(note_id)
+            self._shared_written.pop(note_id, None)
+            removed += 1
+        return added, changed, removed
 
 
 def preview(text, lines=3, width=120):

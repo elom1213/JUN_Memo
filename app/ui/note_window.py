@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 # Python Script by Ji Hun Park
-# last Update date : 2026-11-23
+# last Update date : 2026-11-23 (v01.01)
 # JUN_Memo - 스티커 노트 창 하나
 """
 윈도우 스티커 메모처럼 생긴 노트 창. 테두리 없는 창 + 색 띠(위) + 본문 + 서식 줄(아래).
 
-    위쪽 띠 : [+] 새 노트 · (띠를 잡고 끌면 창 이동) · [Pin] 늘 맨 위 · [...] 색 / Notes list / Delete · [x] 닫기
+    위쪽 띠 : [+] 새 노트 · 범위 표시(Shared / This PC, v01.01) · (띠를 잡고 끌면 창 이동) · [Pin] 늘 맨 위 ·
+              [...] 색 / Shared (GitHub) 켜고 끄기 / Notes list / Delete · [x] 닫기
     본문    : 서식 있는 글 (붙여 넣기는 글자만 - 다른 프로그램의 배경색 · 글꼴이 색 노트를 깨지 않게)
     아래    : B I U S • (Ctrl+B / I / U / T / Shift+L) · 오른쪽 아래 모서리 = 크기 조절
 
@@ -14,7 +15,7 @@
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QShortcut, QTextCharFormat, QTextCursor, QTextListFormat
-from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QMenu, QMessageBox, QSizeGrip, QTextEdit,
+from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox, QSizeGrip, QTextEdit,
                                QToolButton, QVBoxLayout, QWidget, QWidgetAction, QGridLayout)
 
 from app.core import store as st
@@ -67,6 +68,7 @@ class NoteWindow(QWidget):
     deleteRequested = Signal(str)
     colorChanged = Signal(str, str)
     pinChanged = Signal(str, bool)
+    scopeChanged = Signal(str, str)         # v01.01 노트 id, "shared" / "local"
 
     def __init__(self, note):
         super().__init__(None, Qt.Window | Qt.FramelessWindowHint)
@@ -77,6 +79,7 @@ class NoteWindow(QWidget):
         self._closing_quietly = False
         self.color = note["color"]
         self.pinned = False
+        self.scope = note.get("scope", st.SCOPE_LOCAL)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -92,6 +95,12 @@ class NoteWindow(QWidget):
         self.btn_new = self._tool("+", "New note (Ctrl+N)")
         self.btn_new.clicked.connect(lambda: self.newNoteRequested.emit(self.note_id))
         hl.addWidget(self.btn_new)
+        self.lbl_scope = QLabel(self.header)
+        self.lbl_scope.setObjectName("scopeTag")
+        self.lbl_scope.setToolTip("Shared: kept in the GitHub repository (shared/notes).\n"
+                                  "This PC: kept only on this computer.\nChange it in the ... menu.")
+        self.lbl_scope.setFixedHeight(18)
+        hl.addWidget(self.lbl_scope, 0, Qt.AlignVCenter)
         hl.addStretch(1)
         self.btn_pin = self._tool("Pin", "Keep this note on top of other windows")
         self.btn_pin.setCheckable(True)
@@ -155,6 +164,7 @@ class NoteWindow(QWidget):
 
         self.set_color(note["color"], emit=False)
         self.set_pinned(note["pinned"], emit=False)
+        self.set_scope(self.scope, emit=False)
         geo = note.get("geometry")
         if geo:
             self.setGeometry(geo[0], geo[1], max(geo[2], MIN_SIZE.width()), max(geo[3], MIN_SIZE.height()))
@@ -198,6 +208,13 @@ class NoteWindow(QWidget):
         self.act_custom.triggered.connect(self.pick_custom_color)
         menu.addAction(self.act_custom)
         menu.addSeparator()
+        self.act_shared = QAction("Shared (GitHub)", menu)
+        self.act_shared.setCheckable(True)
+        self.act_shared.setToolTip("On: the note is kept in the GitHub repository (shared/notes).\n"
+                                   "Off: kept only on this computer.")
+        self.act_shared.triggered.connect(lambda on: self.set_scope(st.SCOPE_SHARED if on else st.SCOPE_LOCAL))
+        menu.addAction(self.act_shared)
+        menu.addSeparator()
         self.act_list = QAction("Notes list", menu)
         self.act_list.triggered.connect(self.listRequested.emit)
         menu.addAction(self.act_list)
@@ -223,9 +240,19 @@ class NoteWindow(QWidget):
             "QToolButton {{ color: {text}; background: transparent; border: none; font-size: 13px; padding: 0 6px; }}"
             "QToolButton:hover {{ background: #0000001F; }}"
             "QToolButton:checked {{ background: {pin}; color: #202020; }}"
-            "QToolButton::menu-indicator {{ image: none; width: 0; }}".format(pin=PIN_ON, **pal))
+            "QToolButton::menu-indicator {{ image: none; width: 0; }}"
+            "#scopeTag {{ color: {text}; border: 1px solid {text}; border-radius: 3px; padding: 0 4px; "
+            "font-size: 9px; }}".format(pin=PIN_ON, **pal))
         if emit and not self._loading:
             self.colorChanged.emit(self.note_id, color)
+
+    def set_scope(self, scope, emit=True):
+        """Shared (GitHub) / This PC - 표시와 메뉴 체크."""
+        self.scope = scope if scope in st.SCOPES else st.SCOPE_LOCAL
+        self.lbl_scope.setText("Shared" if self.scope == st.SCOPE_SHARED else "This PC")
+        self.act_shared.setChecked(self.scope == st.SCOPE_SHARED)
+        if emit and not self._loading:
+            self.scopeChanged.emit(self.note_id, self.scope)
 
     def pick_custom_color(self):
         start = QColor(st.palette(self.color)["body"])

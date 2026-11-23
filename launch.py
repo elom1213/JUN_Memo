@@ -21,7 +21,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, 
 from PySide6.QtNetwork import QLocalServer, QLocalSocket   # noqa: E402
 from PySide6.QtWidgets import QApplication   # noqa: E402
 
-APP_ID = "JUN.Memo"
+from app.config.version import APP_USER_MODEL_ID as APP_ID   # noqa: E402  (시작 메뉴 바로가기와 같은 앱 ID)
 SERVER_NAME = "JUN_Memo_single_instance_" + (os.environ.get("USERNAME") or "user")
 ICON_DIR = os.path.join(HERE, "icon")
 

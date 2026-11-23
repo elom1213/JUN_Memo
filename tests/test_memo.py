@@ -12,6 +12,9 @@ import tempfile
 import time
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+# 공유 노트 폴더는 시험 동안 임시 폴더로 (저장소의 shared/notes 를 건드리지 않게)
+SHARED_TMP = tempfile.mkdtemp(prefix="jun_memo_shared_")
+os.environ["JUN_MEMO_SHARED"] = SHARED_TMP
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
@@ -229,6 +232,7 @@ try:
     pump()
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(SHARED_TMP, ignore_errors=True)
 
 print("\nRESULT: {0}/{1} passed".format(sum(R), len(R)))
 sys.exit(0 if all(R) else 1)
