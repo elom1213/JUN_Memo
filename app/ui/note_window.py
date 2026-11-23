@@ -1,0 +1,345 @@
+# -*- coding: utf-8 -*-
+# Python Script by Ji Hun Park
+# last Update date : 2026-11-23
+# JUN_Memo - 스티커 노트 창 하나
+"""
+윈도우 스티커 메모처럼 생긴 노트 창. 테두리 없는 창 + 색 띠(위) + 본문 + 서식 줄(아래).
+
+    위쪽 띠 : [+] 새 노트 · (띠를 잡고 끌면 창 이동) · [Pin] 늘 맨 위 · [...] 색 / Notes list / Delete · [x] 닫기
+    본문    : 서식 있는 글 (붙여 넣기는 글자만 - 다른 프로그램의 배경색 · 글꼴이 색 노트를 깨지 않게)
+    아래    : B I U S • (Ctrl+B / I / U / T / Shift+L) · 오른쪽 아래 모서리 = 크기 조절
+
+모든 UI 문자열은 영어 (한국어는 주석만).
+"""
+
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QShortcut, QTextCharFormat, QTextCursor, QTextListFormat
+from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QMenu, QMessageBox, QSizeGrip, QTextEdit,
+                               QToolButton, QVBoxLayout, QWidget, QWidgetAction, QGridLayout)
+
+from app.core import store as st
+
+DEFAULT_SIZE = QSize(320, 320)
+MIN_SIZE = QSize(200, 140)
+PIN_ON = "#FFB3B3"          # 켜진 Pin = 연한 빨강 (JUN 툴들과 같은 표시)
+
+
+class _Editor(QTextEdit):
+    """붙여 넣기는 글자만."""
+
+    def insertFromMimeData(self, source):
+        if source.hasText():
+            self.insertPlainText(source.text())
+        else:
+            super().insertFromMimeData(source)
+
+
+class _Header(QFrame):
+    """위쪽 색 띠 - 잡고 끌면 창이 움직인다, 더블클릭은 무시(스티커는 최대화가 없다)."""
+
+    def __init__(self, window):
+        super().__init__(window)
+        self._window = window
+        self._grab = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._grab = event.globalPosition().toPoint() - self._window.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._grab is not None and event.buttons() & Qt.LeftButton:
+            self._window.move(event.globalPosition().toPoint() - self._grab)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._grab = None
+
+
+class NoteWindow(QWidget):
+    """노트 하나. controller 가 만들고 저장 · 목록 갱신을 맡는다."""
+
+    contentChanged = Signal(str)            # 노트 id - 글이 바뀜 (controller 가 모아서 저장)
+    geometryChanged = Signal(str)
+    closedByUser = Signal(str)
+    newNoteRequested = Signal(str)          # 이 노트 옆에 새 노트
+    listRequested = Signal()
+    deleteRequested = Signal(str)
+    colorChanged = Signal(str, str)
+    pinChanged = Signal(str, bool)
+
+    def __init__(self, note):
+        super().__init__(None, Qt.Window | Qt.FramelessWindowHint)
+        self.note_id = note["id"]
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.setMinimumSize(MIN_SIZE)
+        self._loading = True
+        self._closing_quietly = False
+        self.color = note["color"]
+        self.pinned = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ---- 위쪽 띠
+        self.header = _Header(self)
+        self.header.setObjectName("noteHeader")
+        self.header.setFixedHeight(34)
+        hl = QHBoxLayout(self.header)
+        hl.setContentsMargins(4, 0, 4, 0)
+        hl.setSpacing(2)
+        self.btn_new = self._tool("+", "New note (Ctrl+N)")
+        self.btn_new.clicked.connect(lambda: self.newNoteRequested.emit(self.note_id))
+        hl.addWidget(self.btn_new)
+        hl.addStretch(1)
+        self.btn_pin = self._tool("Pin", "Keep this note on top of other windows")
+        self.btn_pin.setCheckable(True)
+        self.btn_pin.toggled.connect(self._on_pin_clicked)
+        hl.addWidget(self.btn_pin)
+        self.btn_menu = self._tool("…", "Color, notes list, delete")
+        self.btn_menu.setPopupMode(QToolButton.InstantPopup)
+        self.btn_menu.setMenu(self._build_menu())
+        hl.addWidget(self.btn_menu)
+        self.btn_close = self._tool("✕", "Close this note (it stays in the notes list)")
+        self.btn_close.clicked.connect(self.close)
+        hl.addWidget(self.btn_close)
+        root.addWidget(self.header)
+
+        # ---- 본문
+        self.editor = _Editor(self)
+        self.editor.setObjectName("noteEditor")
+        self.editor.setFrameShape(QFrame.NoFrame)
+        self.editor.setPlaceholderText("Take a note...")
+        self.editor.setAcceptRichText(True)
+        font = QFont("Segoe UI", 11)
+        self.editor.document().setDefaultFont(font)
+        self.editor.setHtml(note["html"]) if note["html"] else self.editor.setPlainText(note["text"])
+        self.editor.textChanged.connect(self._on_text_changed)
+        root.addWidget(self.editor, 1)
+
+        # ---- 아래 서식 줄 + 크기 손잡이
+        self.footer = QFrame(self)
+        self.footer.setObjectName("noteFooter")
+        fl = QHBoxLayout(self.footer)
+        fl.setContentsMargins(4, 0, 0, 0)
+        fl.setSpacing(2)
+        self.fmt_buttons = {}
+        for key, label, tip in (("bold", "B", "Bold (Ctrl+B)"), ("italic", "I", "Italic (Ctrl+I)"),
+                                ("underline", "U", "Underline (Ctrl+U)"), ("strike", "S", "Strikethrough (Ctrl+T)"),
+                                ("bullet", "•", "Bullets (Ctrl+Shift+L)")):
+            b = self._tool(label, tip)
+            f = b.font()
+            f.setBold(key == "bold")
+            f.setItalic(key == "italic")
+            f.setUnderline(key == "underline")
+            f.setStrikeOut(key == "strike")
+            b.setFont(f)
+            b.clicked.connect(lambda _=False, k=key: self.apply_format(k))
+            self.fmt_buttons[key] = b
+            fl.addWidget(b)
+        fl.addStretch(1)
+        self.grip = QSizeGrip(self.footer)
+        fl.addWidget(self.grip, 0, Qt.AlignBottom | Qt.AlignRight)
+        root.addWidget(self.footer)
+
+        for seq, key in (("Ctrl+B", "bold"), ("Ctrl+I", "italic"), ("Ctrl+U", "underline"), ("Ctrl+T", "strike"),
+                         ("Ctrl+Shift+L", "bullet")):
+            QShortcut(QKeySequence(seq), self, activated=lambda k=key: self.apply_format(k))
+        QShortcut(QKeySequence("Ctrl+N"), self, activated=lambda: self.newNoteRequested.emit(self.note_id))
+
+        self._geo_timer = QTimer(self)
+        self._geo_timer.setSingleShot(True)
+        self._geo_timer.setInterval(300)
+        self._geo_timer.timeout.connect(lambda: self.geometryChanged.emit(self.note_id))
+
+        self.set_color(note["color"], emit=False)
+        self.set_pinned(note["pinned"], emit=False)
+        geo = note.get("geometry")
+        if geo:
+            self.setGeometry(geo[0], geo[1], max(geo[2], MIN_SIZE.width()), max(geo[3], MIN_SIZE.height()))
+        else:
+            self.resize(DEFAULT_SIZE)
+        self.setWindowTitle(self._title())
+        self._loading = False
+
+    # ---------------------------------------------------------------- 만들기
+    def _tool(self, text, tip):
+        b = QToolButton(self)
+        b.setText(text)
+        b.setToolTip(tip)
+        b.setAutoRaise(True)
+        b.setFixedHeight(28)
+        b.setMinimumWidth(28)
+        b.setCursor(Qt.PointingHandCursor)
+        return b
+
+    def _build_menu(self):
+        menu = QMenu(self)
+        # 색 견본 (윈도우 스티커 메모처럼 한 줄)
+        holder = QWidget(menu)
+        grid = QGridLayout(holder)
+        grid.setContentsMargins(8, 6, 8, 6)
+        grid.setSpacing(4)
+        self.swatches = {}
+        for i, (name, pal) in enumerate(st.COLORS.items()):
+            b = QToolButton(holder)
+            b.setFixedSize(30, 30)
+            b.setToolTip(name)
+            b.setStyleSheet("QToolButton {{ background: {0}; border: 1px solid #00000033; }}"
+                            "QToolButton:hover {{ border: 2px solid #00000088; }}".format(pal["header"]))
+            b.clicked.connect(lambda _=False, n=name: (self.set_color(n), menu.close()))
+            grid.addWidget(b, 0, i)
+            self.swatches[name] = b
+        act = QWidgetAction(menu)
+        act.setDefaultWidget(holder)
+        menu.addAction(act)
+        self.act_custom = QAction("Custom color...", menu)
+        self.act_custom.triggered.connect(self.pick_custom_color)
+        menu.addAction(self.act_custom)
+        menu.addSeparator()
+        self.act_list = QAction("Notes list", menu)
+        self.act_list.triggered.connect(self.listRequested.emit)
+        menu.addAction(self.act_list)
+        self.act_delete = QAction("Delete note", menu)
+        self.act_delete.triggered.connect(self._on_delete)
+        menu.addAction(self.act_delete)
+        return menu
+
+    def _title(self):
+        first = st.preview(self.editor.toPlainText(), lines=1, width=40)
+        return "JUN Memo - " + (first or "New note")
+
+    # ---------------------------------------------------------------- 색 · 핀
+    def set_color(self, color, emit=True):
+        pal = st.palette(color)
+        self.color = color
+        self.setStyleSheet(
+            "NoteWindow {{ background: {body}; border: 1px solid #00000040; }}"
+            "#noteHeader {{ background: {header}; }}"
+            "#noteFooter {{ background: {body}; }}"
+            "#noteEditor {{ background: {body}; color: {text}; border: none; padding: 6px 10px; "
+            "selection-background-color: #00000040; }}"
+            "QToolButton {{ color: {text}; background: transparent; border: none; font-size: 13px; padding: 0 6px; }}"
+            "QToolButton:hover {{ background: #0000001F; }}"
+            "QToolButton:checked {{ background: {pin}; color: #202020; }}"
+            "QToolButton::menu-indicator {{ image: none; width: 0; }}".format(pin=PIN_ON, **pal))
+        if emit and not self._loading:
+            self.colorChanged.emit(self.note_id, color)
+
+    def pick_custom_color(self):
+        start = QColor(st.palette(self.color)["body"])
+        color = QColorDialog.getColor(start, self, "Note color")
+        if color.isValid():
+            self.set_color(color.name().upper())
+
+    def _on_pin_clicked(self, on):
+        self.set_pinned(on)
+
+    def set_pinned(self, on, emit=True):
+        """늘 맨 위. 창 플래그를 바꾸면 Qt 가 창을 숨기므로 보이던 창이면 다시 보인다."""
+        on = bool(on)
+        self.pinned = on
+        if self.btn_pin.isChecked() != on:
+            self.btn_pin.blockSignals(True)
+            self.btn_pin.setChecked(on)
+            self.btn_pin.blockSignals(False)
+        self.btn_pin.setText("Pinned" if on else "Pin")
+        visible = self.isVisible()
+        geo = self.geometry()
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, on)
+        if visible:
+            self.setGeometry(geo)
+            self.show()
+        if emit and not self._loading:
+            self.pinChanged.emit(self.note_id, on)
+
+    # ---------------------------------------------------------------- 서식
+    def apply_format(self, key):
+        cursor = self.editor.textCursor()
+        if key == "bullet":
+            if cursor.currentList() is not None:            # 이미 글머리표면 고른 줄 모두 풀기
+                doc = self.editor.document()
+                first = doc.findBlock(cursor.selectionStart())
+                last = doc.findBlock(cursor.selectionEnd())
+                block = first
+                while block.isValid():
+                    lst = block.textList()
+                    if lst is not None:
+                        lst.remove(block)
+                        c = QTextCursor(block)
+                        fmt = block.blockFormat()
+                        fmt.setIndent(0)
+                        fmt.setObjectIndex(-1)              # 목록 연결까지 끊는다 (remove 만으로는 남는다)
+                        c.setBlockFormat(fmt)
+                    if block == last:
+                        break
+                    block = block.next()
+            else:
+                cursor.createList(QTextListFormat.ListDisc)
+            self.editor.setFocus()
+            return
+        fmt = QTextCharFormat()
+        now = self.editor.currentCharFormat()
+        if key == "bold":
+            fmt.setFontWeight(QFont.Normal if now.fontWeight() > QFont.Normal else QFont.Bold)
+        elif key == "italic":
+            fmt.setFontItalic(not now.fontItalic())
+        elif key == "underline":
+            fmt.setFontUnderline(not now.fontUnderline())
+        elif key == "strike":
+            fmt.setFontStrikeOut(not now.fontStrikeOut())
+        cursor.mergeCharFormat(fmt)
+        self.editor.mergeCurrentCharFormat(fmt)
+        self.editor.setFocus()
+
+    # ---------------------------------------------------------------- 이벤트
+    def _on_text_changed(self):
+        if self._loading:
+            return
+        self.setWindowTitle(self._title())
+        self.contentChanged.emit(self.note_id)
+
+    def content(self):
+        """(html, 글자만). 빈 노트는 html 도 비운다."""
+        text = self.editor.toPlainText()
+        return (self.editor.toHtml() if text.strip() else ""), text
+
+    def _on_delete(self):
+        answer = QMessageBox.question(self, "Delete note", "Delete this note?",
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            self.deleteRequested.emit(self.note_id)
+
+    def close_quietly(self):
+        """목록에서 지울 때 등 - 닫힘을 '사용자가 닫음' 으로 알리지 않는다."""
+        self._closing_quietly = True
+        self.close()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if not self._loading:
+            self._geo_timer.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self._loading:
+            self._geo_timer.start()
+
+    def closeEvent(self, event):
+        self._geo_timer.stop()
+        if not self._closing_quietly:
+            self.geometryChanged.emit(self.note_id)
+            self.closedByUser.emit(self.note_id)
+        super().closeEvent(event)
+
+    def bring_to_front(self):
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def cascade_point(self):
+        """새 노트를 놓을 자리 (이 노트 오른쪽 아래로 조금)."""
+        return self.frameGeometry().topLeft() + QPoint(30, 30)
