@@ -18,10 +18,10 @@ v01.01
 import time
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QColorDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QRadioButton, QToolButton,
-                               QVBoxLayout, QWidget, QWidgetAction)
+                               QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QRadioButton, QSizePolicy,
+                               QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
 from app.config.version import VERSION
 from app.core import store as st
@@ -73,8 +73,24 @@ class _Card(QFrame):
         f = self.lbl_scope.font()
         f.setPointSizeF(7 * zoom)
         self.lbl_scope.setFont(f)
-        top.addWidget(self.lbl_scope)
-        top.addStretch(1)
+        # v01.09 배지 높이를 글꼴로 고정 - 안 그러면 같은 줄의 시각(📌 이모지 등) 높이만큼 늘어나 카드마다 달랐다
+        self.lbl_scope.setFixedHeight(QFontMetrics(f).height() + 4)
+        top.addWidget(self.lbl_scope, 0, Qt.AlignVCenter)
+        # v01.09 제목 - 범위 배지 옆 (없으면 비운다). 좁으면 잘리고 시각은 늘 보인다
+        title = note.get("title", "")
+        self.lbl_title = QLabel(title if len(title) <= 60 else title[:59] + "…")
+        self.lbl_title.setObjectName("cardTitle")
+        self.lbl_title.setToolTip(title)
+        self.lbl_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        f = QFont("Segoe UI")
+        f.setPointSizeF(9 * zoom)
+        f.setBold(True)
+        self.lbl_title.setFont(f)
+        self.lbl_title.setVisible(bool(title))
+        top.addSpacing(4)
+        top.addWidget(self.lbl_title, 1, Qt.AlignVCenter)
+        if not title:
+            top.addStretch(1)
         self.lbl_time = QLabel(when(note["modified"]) + ("   📌" if note["pinned"] else ""))
         f = self.lbl_time.font()
         f.setPointSizeF(8 * zoom)

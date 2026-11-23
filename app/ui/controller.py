@@ -92,7 +92,8 @@ class Controller(QObject):
         if win is None:
             return False
         html, text = win.content()
-        return self.store.set_content(note_id, html, text)
+        titled = self.store.set_title(note_id, win.note_title())     # v01.09 닫거나 끌 때 제목도 놓치지 않게
+        return self.store.set_content(note_id, html, text) or titled
 
     def _pull_geometry(self, note_id):
         win = self.windows.get(note_id)
@@ -113,6 +114,7 @@ class Controller(QObject):
         win = NoteWindow(note)
         self._fit_on_screen(win)
         win.contentChanged.connect(self._on_content)
+        win.titleChanged.connect(self._on_title)                    # v01.09
         win.geometryChanged.connect(self._on_geometry)
         win.closedByUser.connect(self._on_closed)
         win.newNoteRequested.connect(self._on_new_from)
@@ -275,6 +277,11 @@ class Controller(QObject):
     # ---------------------------------------------------------------- 창 알림
     def _on_content(self, note_id):
         if self._pull_content(note_id):
+            self.schedule_save()
+
+    def _on_title(self, note_id, title):
+        """v01.09 제목 - 치는 동안 모아서 저장(저장하며 목록도 다시 그린다)."""
+        if self.store.set_title(note_id, title):
             self.schedule_save()
 
     def _on_geometry(self, note_id):

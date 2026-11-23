@@ -52,6 +52,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 | **`Pin`** | **늘 다른 창 위에**. 켜지면 `Pinned` · 연한 빨강. 다시 누르면 해제 |
 | `…` | **색 견본 7개**(Yellow · Green · Pink · Purple · Blue · Gray · Charcoal) · `Custom color...`(아무 색) · **`Shared (GitHub)`** 켜고 끄기 · Notes list · Delete note |
 | 띠 왼쪽 `Shared` / `This PC` | 이 노트의 범위 (3장) — **Shared = 파랑, This PC = 초록** 배지(v01.07) |
+| 배지 옆 `Title` (v01.09) | **노트 제목**. 목록 카드에도 배지 옆에 굵게 보이고 검색도 된다. 공유 노트면 제목도 공유된다. Enter = 본문으로 |
 | `✕` | 닫기 — 노트는 목록에 남는다. **빈 노트는 닫을 때 지운다** |
 | 아래 `T− T+` (v01.06) | **끌어서 고른 글자만** 한 단계 작게 / 크게 (작게 · 보통 · 크게 · 더 크게 · 가장 크게), Ctrl+Shift+, / Ctrl+Shift+. — 노트 전체 배율과 곱해진다. 고른 것이 없으면 이어서 칠 글자 |
 | 아래 `A− 100% A+` (v01.05) | 글자 크기 60 ~ 300% (Ctrl + 휠 · Ctrl+= / − / 0, 퍼센트 클릭 = 100%). 노트마다 이 PC 에 기억 |
@@ -116,7 +117,7 @@ JUN_Memo/
 ├── app/ui/controller.py   # 목록 · 노트 창 · 저장 잇기 (자동 저장, 빈 노트 지우기, 다시 열기)
 ├── icon/JUN_Memo.ico · .png
 ├── shared/notes/          # 공유 노트 (<id>.json, git 으로 올라간다)
-└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py · test_scope_colors.py · test_default_color.py · test_reorder.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
+└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py · test_scope_colors.py · test_default_color.py · test_reorder.py · test_title_badge.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
 ```
 
 ## 6. 시험

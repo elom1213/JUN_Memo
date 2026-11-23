@@ -6,6 +6,7 @@
 노트 하나 = dict:
     id        : 고유 문자열 (uuid4 hex)
     scope     : "local" (이 PC 에서만) / "shared" (GitHub 로 공유 - 저장소 안 shared 폴더)
+    title     : 제목 (v01.09 - 노트 위쪽 띠의 범위 배지 옆, 비어 있어도 된다)
     html      : 본문 (QTextEdit HTML)
     text      : 본문 글자만 (목록 미리보기 · 검색)
     color     : 색 이름(COLORS 키) 또는 "#rrggbb" (사용자 색)
@@ -55,7 +56,7 @@ DEFAULT_COLOR = "Yellow"
 SCOPE_COLORS = {"shared": "#1A73E8", "local": "#2E7D32"}
 SCOPE_TEXT = {"shared": "Shared", "local": "This PC"}
 DEFAULT_LIST_COLOR = "Gray"
-CONTENT_KEYS = ("id", "html", "text", "color", "created", "modified")
+CONTENT_KEYS = ("id", "title", "html", "text", "color", "created", "modified")
 VIEW_KEYS = ("open", "pinned", "geometry", "zoom")
 ZOOM_MIN, ZOOM_MAX, ZOOM_STEP = 0.6, 3.0, 0.1       # v01.05 글자 크기 배율 (노트마다 · 목록 창)
 
@@ -269,6 +270,7 @@ class NoteStore(object):
         return {
             "id": str(raw["id"]),
             "scope": scope,
+            "title": str(raw.get("title") or ""),
             "html": str(raw.get("html") or ""),
             "text": str(raw.get("text") or ""),
             "color": color if is_color(color) else DEFAULT_COLOR,
@@ -328,7 +330,7 @@ class NoteStore(object):
     # ---------------------------------------------------------------- 노트
     def new_note(self, color=None, geometry=None, scope=SCOPE_LOCAL):
         now = time.time()
-        note = {"id": uuid.uuid4().hex, "scope": scope if scope in SCOPES else SCOPE_LOCAL, "html": "", "text": "",
+        note = {"id": uuid.uuid4().hex, "scope": scope if scope in SCOPES else SCOPE_LOCAL, "title": "", "html": "", "text": "",
                 "color": color if is_color(color) else self.note_color, "pinned": False, "open": True,
                 "geometry": list(geometry) if geometry else None, "zoom": 1.0, "created": now, "modified": now}
         self.notes[note["id"]] = note
@@ -343,6 +345,16 @@ class NoteStore(object):
         if note is None or (note["html"] == html and note["text"] == text):
             return False
         note["html"], note["text"] = html, text
+        note["modified"] = time.time()
+        return True
+
+    def set_title(self, note_id, title):
+        """v01.09 제목 - 내용이므로 바뀌면 modified 를 올린다(공유 노트면 공유 파일에 들어간다). 바뀌었으면 True."""
+        note = self.notes.get(note_id)
+        title = " ".join(str(title or "").split())          # 한 줄로 (줄바꿈 · 겹친 공백 없이)
+        if note is None or note["title"] == title:
+            return False
+        note["title"] = title
         note["modified"] = time.time()
         return True
 
@@ -373,7 +385,7 @@ class NoteStore(object):
 
     def is_empty(self, note_id):
         note = self.notes.get(note_id)
-        return note is not None and not note["text"].strip()
+        return note is not None and not note["text"].strip() and not note["title"].strip()
 
     def ordered(self, query="", scope=None):
         """목록 순서. query = 공백으로 나눈 낱말이 모두(대소문자 무시). scope = None(전부) / local / shared.
@@ -381,7 +393,7 @@ class NoteStore(object):
         v01.08: 끌어 놓아 정한 순서(self.order)가 있으면 그 순서. 그 순서에 없는 노트(새 노트 · 다른 PC 에서 온 공유 노트)는
         맨 위에, 그것들끼리는 최근에 고친 것이 위. 순서를 한 번도 안 정했으면 예전처럼 최근에 고친 것이 위."""
         words = [w.lower() for w in (query or "").split() if w]
-        out = [n for n in self.notes.values() if all(w in n["text"].lower() for w in words) and
+        out = [n for n in self.notes.values() if all(w in (n["title"] + "\n" + n["text"]).lower() for w in words) and
                (scope is None or n["scope"] == scope)]
         rank = {note_id: i for i, note_id in enumerate(self.order)}
         return sorted(out, key=lambda n: (1, rank[n["id"]], 0) if n["id"] in rank else (0, 0, -n["modified"]))

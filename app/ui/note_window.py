@@ -18,8 +18,8 @@ import re
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QAction, QColor, QFont, QKeySequence, QPalette, QShortcut, QTextCharFormat, QTextCursor,
                            QTextFormat, QTextListFormat)
-from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox, QSizeGrip, QTextEdit,
-                               QToolButton, QVBoxLayout, QWidget, QWidgetAction, QGridLayout)
+from PySide6.QtWidgets import (QColorDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QSizeGrip,
+                               QTextEdit, QToolButton, QVBoxLayout, QWidget, QWidgetAction, QGridLayout)
 
 from app.core import store as st
 
@@ -94,6 +94,7 @@ class NoteWindow(QWidget):
     pinChanged = Signal(str, bool)
     scopeChanged = Signal(str, str)         # v01.01 노트 id, "shared" / "local"
     zoomChanged = Signal(str, float)        # v01.05 노트 id, 글자 크기 배율
+    titleChanged = Signal(str, str)         # v01.09 노트 id, 제목
 
     def __init__(self, note):
         super().__init__(None, Qt.Window | Qt.FramelessWindowHint)
@@ -126,7 +127,19 @@ class NoteWindow(QWidget):
                                   "This PC: kept only on this computer.\nChange it in the ... menu.")
         self.lbl_scope.setFixedHeight(18)
         hl.addWidget(self.lbl_scope, 0, Qt.AlignVCenter)
-        hl.addStretch(1)
+        # v01.09 제목 - 범위 배지 옆. 띠의 빈 곳은 그대로 끌어서 창을 옮길 수 있다
+        self.ipf_title = QLineEdit(self.header)
+        self.ipf_title.setObjectName("noteTitle")
+        self.ipf_title.setPlaceholderText("Title")
+        self.ipf_title.setToolTip("Title of this note (shown in the notes list and searched too).")
+        self.ipf_title.setFrame(False)
+        self.ipf_title.setFixedHeight(22)
+        self.ipf_title.setMinimumWidth(40)
+        self.ipf_title.setText(note.get("title", ""))
+        self.ipf_title.textEdited.connect(self._on_title_edited)
+        self.ipf_title.returnPressed.connect(lambda: self.editor.setFocus())
+        hl.addSpacing(4)
+        hl.addWidget(self.ipf_title, 1, Qt.AlignVCenter)
         self.btn_pin = self._tool("Pin", "Keep this note on top of other windows")
         self.btn_pin.setCheckable(True)
         self.btn_pin.toggled.connect(self._on_pin_clicked)
@@ -276,8 +289,22 @@ class NoteWindow(QWidget):
         return menu
 
     def _title(self):
-        first = st.preview(self.editor.toPlainText(), lines=1, width=40)
+        first = self.ipf_title.text().strip() or st.preview(self.editor.toPlainText(), lines=1, width=40)
         return "JUN Memo - " + (first or "New note")
+
+    def note_title(self):
+        return self.ipf_title.text()
+
+    def set_note_title(self, title):
+        """v01.09 밖(다시 읽은 공유 노트 등)에서 제목을 바꿀 때 - 신호 없이."""
+        if self.ipf_title.text() != title:
+            self.ipf_title.setText(title)
+        self.setWindowTitle(self._title())
+
+    def _on_title_edited(self, text):
+        self.setWindowTitle(self._title())
+        if not self._loading:
+            self.titleChanged.emit(self.note_id, text)
 
     # ---------------------------------------------------------------- 색 · 핀
     def set_color(self, color, emit=True):
@@ -296,6 +323,11 @@ class NoteWindow(QWidget):
             "QToolButton::menu-indicator {{ image: none; width: 0; }}"
             # v01.06 아래 줄은 버튼이 많아(서식 5 + 고른 글자 크기 2 + 전체 크기 3) 여백을 줄인다 - 100% 가 ... 로 잘렸다
             "#noteFooter QToolButton {{ padding: 0 3px; min-width: 20px; }}"
+            # v01.09 제목칸 - 띠와 같은 바탕, 굵은 글자. 고칠 때만 옅은 테두리
+            "#noteTitle {{ background: transparent; color: {text}; border: 1px solid transparent; border-radius: 3px; "
+            "padding: 0 4px; font-size: 13px; font-weight: bold; "
+            "selection-background-color: {sel_bg}; selection-color: {sel_fg}; }}"
+            "#noteTitle:hover, #noteTitle:focus {{ border-color: #00000040; background: {body}; }}"
             .format(pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
         # 범위 배지는 범위 색으로 따로 칠한다 (v01.07 - set_scope)
         # 팔레트에도 같은 선택 색 - 창이 포커스를 잃었을 때(Inactive)도 선택이 보이게 (스타일시트만으로는 비활성 색이 남는다)
