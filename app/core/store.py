@@ -153,7 +153,7 @@ class NoteStore(object):
         self.local_dir = local_dir
         self.shared_dir = shared_dir or default_shared_dir()
         self.notes = {}             # id -> note
-        self.list_view = {"color": DEFAULT_LIST_COLOR, "pinned": False, "geometry": None}
+        self.list_view = {"color": DEFAULT_LIST_COLOR, "pinned": False, "geometry": None, "shrunk": False}
         self.error = ""             # 마지막 읽기 / 쓰기 문제 (UI 가 로그로 보여 준다)
         self._shared_written = {}   # id -> 마지막으로 쓰거나 읽은 공유 파일 내용 (바뀐 것만 쓰기)
         self.load()
@@ -228,6 +228,7 @@ class NoteStore(object):
         geo = lv.get("geometry")
         self.list_view = {"color": lv.get("color") if is_color(lv.get("color")) else DEFAULT_LIST_COLOR,
                           "pinned": bool(lv.get("pinned", False)),
+                          "shrunk": bool(lv.get("shrunk", False)),
                           "geometry": [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None}
 
     @staticmethod

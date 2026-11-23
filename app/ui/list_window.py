@@ -25,6 +25,10 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QColorDialog, QF
 
 from app.config.version import VERSION
 from app.core import store as st
+from app.ui.memo_anim import MemoAnim
+
+SHRINK_WIDTH = 272          # A00220 · A00240 · A00370 과 같은 줄인 크기
+SHRINK_HEIGHT = 155
 
 PIN_ON = "#FFB3B3"
 SCOPE_ALL = "all"
@@ -99,12 +103,20 @@ class ListWindow(QWidget):
         self.setWindowTitle("JUN Memo v{0}".format(VERSION))
         self.setObjectName("listWindow")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.resize(340, 540)
+        self.resize(380, 540)              # v01.04 머리 줄에 Shrink · Pin(72 px 둘)이 들어가 조금 넓게
         self.pinned = False
+        self.shrunk = False
+        self._full_size = None      # 줄이기 전 크기 (되돌릴 때)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
         row = QHBoxLayout()
+        self.header_row = row
+        # v01.04 Shrink 동안만 보이는 아이콘 애니메이션 (헤더 왼쪽, 클릭하면 펴기)
+        self.anim = MemoAnim(self)
+        self.anim.clicked.connect(lambda: self.set_shrunk(False))
+        self.anim.hide()
+        row.addWidget(self.anim)
         self.lbl_title = QLabel("Sticky Notes")
         tf = self.lbl_title.font()
         tf.setPointSize(14)
@@ -117,10 +129,23 @@ class ListWindow(QWidget):
         self.btn_new.clicked.connect(lambda: self.newRequested.emit(
             st.SCOPE_SHARED if self.scope_filter == st.SCOPE_SHARED else st.SCOPE_LOCAL))
         row.addWidget(self.btn_new)
+        # v01.04 Shrink · Pin 은 작은 그리드에 - 평소엔 한 줄 [Shrink][Pin], 줄였을 땐 Pin 을 Shrunk 아래로 (A00220 과 같다)
+        self.btn_shrink = self._tool("Shrink", "Shrink the notes list to a small animated icon "
+                                               "(click Shrunk or the icon to open it again)")
+        self.btn_shrink.setCheckable(True)
+        self.btn_shrink.setFixedSize(72, 28)
+        self.btn_shrink.toggled.connect(lambda on: self.set_shrunk(on))
         self.btn_pin = self._tool("Pin", "Keep the notes list on top of other windows")
         self.btn_pin.setCheckable(True)
+        self.btn_pin.setFixedSize(72, 28)
         self.btn_pin.toggled.connect(lambda on: self.set_pinned(on))
-        row.addWidget(self.btn_pin)
+        self.button_grid = QGridLayout()
+        self.button_grid.setContentsMargins(0, 0, 0, 0)
+        self.button_grid.setSpacing(4)
+        self.button_grid.addWidget(self.btn_shrink, 0, 0)
+        self.button_grid.addWidget(self.btn_pin, 0, 1)
+        row.addLayout(self.button_grid)
+        row.setAlignment(self.button_grid, Qt.AlignTop)
         self.btn_menu = self._tool("…", "Color, shared notes, Start menu / taskbar")
         self.btn_menu.setPopupMode(QToolButton.InstantPopup)
         self.btn_menu.setMenu(self._build_menu())
@@ -176,6 +201,10 @@ class ListWindow(QWidget):
         self.btn_push.clicked.connect(self.pushSharedRequested.emit)
         bottom.addWidget(self.btn_push)
         root.addLayout(bottom)
+
+        # Shrink 가 감추는 것들 (애니메이션 · Shrunk · Pin 만 남는다)
+        self._shrink_hidden = [self.lbl_title, self.btn_new, self.btn_menu, self.ipf_search, self.list,
+                               self.lbl_count, self.btn_push] + list(self.scope_buttons.buttons())
 
         view = store.list_view
         self.set_color(view.get("color") or st.DEFAULT_LIST_COLOR, emit=False)
@@ -372,5 +401,50 @@ class ListWindow(QWidget):
 
     def geometry_list(self):
         """[x, y, w, h] - 위치는 **바깥**(제목 표시줄 포함, move() 와 같은 기준), 크기는 안쪽.
-        geometry() 의 안쪽 위치로 저장하고 move() 로 되살리면 켤 때마다 테두리만큼 밀린다(시험이 잡음)."""
-        return [self.x(), self.y(), self.width(), self.height()]
+        geometry() 의 안쪽 위치로 저장하고 move() 로 되살리면 켤 때마다 테두리만큼 밀린다(시험이 잡음).
+        줄여 둔 동안은 줄이기 전 크기를 돌려준다(다시 켜서 펼 때 작은 창이 되지 않게)."""
+        w, h = self._full_size if (self.shrunk and self._full_size) else (self.width(), self.height())
+        return [self.x(), self.y(), w, h]
+
+    # ---------------------------------------------------------------- Shrink (v01.04)
+    def set_shrunk(self, on, emit=True):
+        """애니메이션 · Shrunk · Pin 만 남기고 SHRINK_WIDTH x SHRINK_HEIGHT 로 (A00220_BackupTool 과 같은 방식).
+
+        감추는 위젯은 지우지 않고 hide / show 만 - 검색어 · 필터 · 스크롤이 그대로 돌아온다. Pin 은 그리드에서 Shrunk 아래 칸으로.
+        숨긴 뒤 layout().invalidate() + activate() 를 해야 창이 실제로 줄어든다(옛 최소 크기에 막힌다 - A00220 의 교훈).
+        애니메이션 타이머는 줄여 둔 동안에만 돈다.
+        """
+        on = bool(on)
+        if on == self.shrunk and self.btn_shrink.isChecked() == on:
+            return
+        self.shrunk = on
+        if self.btn_shrink.isChecked() != on:
+            self.btn_shrink.blockSignals(True)
+            self.btn_shrink.setChecked(on)
+            self.btn_shrink.blockSignals(False)
+        self.button_grid.removeWidget(self.btn_pin)
+        if on:
+            self._full_size = (self.width(), self.height())
+            for w in self._shrink_hidden:
+                w.hide()
+            self.button_grid.addWidget(self.btn_pin, 1, 0)
+            self.anim.show()
+            self.anim.set_running(True)
+        else:
+            self.anim.set_running(False)
+            self.anim.hide()
+            self.button_grid.addWidget(self.btn_pin, 0, 1)
+            for w in self._shrink_hidden:
+                w.show()
+        self.btn_shrink.setText("Shrunk" if on else "Shrink")
+        lay = self.layout()
+        lay.invalidate()
+        lay.activate()
+        if on:
+            self.setMinimumSize(0, 0)
+            self.resize(SHRINK_WIDTH, SHRINK_HEIGHT)
+        elif self._full_size:
+            self.resize(*self._full_size)
+        if emit:
+            self.store.list_view["shrunk"] = on
+            self.viewChanged.emit()

@@ -57,6 +57,8 @@ class Controller(QObject):
     def start(self):
         """목록 창을 보이고, 지난번 열려 있던 노트들을 다시 연다."""
         self.list_window.show()
+        if self.store.list_view.get("shrunk"):                  # v01.04 줄여 둔 채 껐으면 줄인 채로
+            self.list_window.set_shrunk(True, emit=False)
         for note in sorted(self.store.notes.values(), key=lambda n: n["created"]):
             if note["open"]:
                 self.open_note(note["id"])
