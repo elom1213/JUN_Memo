@@ -23,7 +23,7 @@
                        note_color (v01.08 새 노트의 기본 색 = 마지막으로 고른 노트 색),
                        order (v01.08 목록에서 끌어 놓아 정한 순서 - 노트 id 목록. PC 마다 다를 수 있다)
     shared_dir (저장소 안 shared/notes)
-        <id>.json    : 공유 노트 하나 = 파일 하나 (내용만). 두 PC 가 **다른** 노트를 고치면 git 에서 충돌하지 않는다.
+        <id>.json    : 공유 노트 하나 = 파일 하나 (내용만). v01.11 부터 html · text 는 줄 배열(git 충돌을 읽을 수 있게). 두 PC 가 **다른** 노트를 고치면 git 에서 충돌하지 않는다.
                        창을 옮기거나 Pin 해도 이 파일은 안 바뀐다(보기 상태는 state.json) - 공유 파일이 쓸데없이 바뀌지 않게.
 
 v01.00 의 notes.json(보기 상태까지 한 파일)은 그대로 읽어 state.json 으로 나눈다.
@@ -156,6 +156,35 @@ def _write_json(path, data, backup=False):
     os.replace(tmp, path)
 
 
+#: v01.11 공유 파일에서 줄 배열로 쓰는 키 - 문자열 하나면 본문 전체가 한 줄(수천 자)이라 git 병합 충돌을 사람이 못 읽었다.
+#: 줄 배열이면 JSON 들여쓰기로 한 줄 = 한 원소가 되어 충돌이 바뀐 문단에만 난다.
+LINE_KEYS = ("html", "text")
+
+
+def _to_lines(value):
+    """문자열 → 줄 배열. 줄바꿈 글자로만 나누므로 다시 이으면 정확히 돌아온다(끝의 빈 줄 · CR 도 그대로)."""
+    return str(value or "").split("\n")
+
+
+def _from_lines(value):
+    """줄 배열(v01.11) 또는 문자열(옛 파일) → 문자열."""
+    if isinstance(value, list):
+        return "\n".join(str(v) for v in value)
+    return str(value or "")
+
+
+def _is_old_shared(raw):
+    """v01.10 까지의 공유 파일 (html / text 가 한 줄 문자열) - 다음 저장 때 줄 배열로 다시 쓴다."""
+    return isinstance(raw, dict) and any(isinstance(raw.get(k), str) for k in LINE_KEYS)
+
+
+def _shared_file_data(payload):
+    data = dict(payload)
+    for k in LINE_KEYS:
+        data[k] = _to_lines(data.get(k))
+    return data
+
+
 # ---------------------------------------------------------------------- 저장소
 class NoteStore(object):
 
@@ -232,7 +261,8 @@ class NoteStore(object):
                 if note["id"] in self.notes:                # 같은 id 가 둘 - 공유 쪽을 쓴다
                     self.notes.pop(note["id"])
                 self.notes[note["id"]] = note
-                self._shared_written[note["id"]] = self._shared_payload(note)
+                # v01.11 옛 형식(한 줄 문자열)이면 None = 다음 저장 때 줄 배열로 다시 쓴다
+                self._shared_written[note["id"]] = None if _is_old_shared(raw) else self._shared_payload(note)
         state = self._read_with_backup(self.state_path) or {}
         views = state.get("notes", {}) if isinstance(state.get("notes"), dict) else {}
         for note_id, note in self.notes.items():
@@ -271,8 +301,8 @@ class NoteStore(object):
             "id": str(raw["id"]),
             "scope": scope,
             "title": str(raw.get("title") or ""),
-            "html": str(raw.get("html") or ""),
-            "text": str(raw.get("text") or ""),
+            "html": _from_lines(raw.get("html")),            # v01.11 줄 배열 또는 옛 문자열
+            "text": _from_lines(raw.get("text")),
             "color": color if is_color(color) else DEFAULT_COLOR,
             "pinned": bool(raw.get("pinned", False)),
             "open": bool(raw.get("open", False)),
@@ -309,7 +339,7 @@ class NoteStore(object):
             if self._shared_written.get(note_id) == payload:
                 continue                                    # 안 바뀐 공유 파일은 건드리지 않는다
             try:
-                _write_json(self.shared_path(note_id), payload)
+                _write_json(self.shared_path(note_id), _shared_file_data(payload))      # v01.11 본문은 줄 배열
                 self._shared_written[note_id] = payload
             except OSError as exc:
                 self.error = "Could not save the shared note {0}: {1}".format(note_id, exc)

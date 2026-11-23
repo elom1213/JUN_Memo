@@ -66,7 +66,7 @@ try:
     check("store: a shared note = one file in shared/notes", shared_files() == [b["id"] + ".json"])
     sb = json.load(open(os.path.join(SHARED, b["id"] + ".json"), encoding="utf-8"))
     check("store: the shared file has the content only (no window place / pin / open - those differ per PC)",
-          sorted(sb) == sorted(st.CONTENT_KEYS) and sb["text"] == "team note" and sb["color"] == "Blue")
+          sorted(sb) == sorted(st.CONTENT_KEYS) and sb["text"] == ["team note"] and sb["color"] == "Blue")
     state = json.load(open(os.path.join(local, "state.json"), encoding="utf-8"))
     check("store: window state of both notes is in this PC's state.json",
           state["notes"][b["id"]]["geometry"] == [10, 10, 300, 300] and state["notes"][b["id"]]["pinned"] and

@@ -83,6 +83,8 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 - **창 자리 · 크기 · 열림 · Pin 은 공유하지 않는다** — PC 마다 화면이 달라서 `%APPDATA%\JUN_Memo\state.json` 에 둔다.
   그래서 창을 옮기거나 Pin 해도 공유 파일은 바뀌지 않는다(git 에 쓸데없는 변경이 안 생긴다). 공유 파일 = 내용 · 색 · 만든 / 고친 시각.
 - 노트마다 파일이 따로라 **두 PC 가 다른 노트를 고치면 git 충돌이 없다.** 같은 노트를 두 곳에서 고쳤을 때만 충돌한다.
+- 공유 파일의 본문(`html` · `text`)은 **줄 배열**로 저장한다(v01.11) — 한 줄 = 한 문단이라 같은 노트라도 **다른 문단을 고쳤으면 git 이 알아서 합치고**,
+  충돌은 **고친 시각(`"modified"`) 한 줄**에만 난다(아무 쪽이나 고르면 된다). 같은 문단을 고쳤으면 그 문단 줄만 `<<<<<<<` · `>>>>>>>` 사이에 보인다.
 - **올리기 = 목록 창 아래 `Push Shared` 버튼** (v01.03) — 열린 노트를 저장하고 **`shared/notes` 만** 커밋해 GitHub 로 푸시한다.
   - 고치는 중인 다른 파일 · 이 PC 노트는 안 올라간다(경로를 정해 커밋). 커밋 메시지 `notes: update N shared note file(s)`.
   - 다른 PC 가 먼저 올렸으면 받아서(`git pull --rebase --autostash`) 다시 푸시하고, 받은 공유 노트를 목록에 읽어 들인다.
@@ -117,7 +119,7 @@ JUN_Memo/
 ├── app/ui/controller.py   # 목록 · 노트 창 · 저장 잇기 (자동 저장, 빈 노트 지우기, 다시 열기)
 ├── icon/JUN_Memo.ico · .png
 ├── shared/notes/          # 공유 노트 (<id>.json, git 으로 올라간다)
-└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py · test_scope_colors.py · test_default_color.py · test_reorder.py · test_title_badge.py · test_header_popup.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
+└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py · test_scope_colors.py · test_default_color.py · test_reorder.py · test_title_badge.py · test_header_popup.py · test_shared_lines.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
 ```
 
 ## 6. 시험
