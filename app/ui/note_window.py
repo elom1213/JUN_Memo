@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Python Script by Ji Hun Park
-# last Update date : 2026-11-23 (v01.01)
+# last Update date : 2026-11-24 (v01.12)
 # JUN_Memo - 스티커 노트 창 하나
 """
 윈도우 스티커 메모처럼 생긴 노트 창. 테두리 없는 창 + 색 띠(위) + 본문 + 서식 줄(아래).
@@ -8,14 +8,15 @@
     위쪽 띠 : [+] 새 노트 · 범위 표시(Shared / This PC, v01.01) · (띠를 잡고 끌면 창 이동) · [Pin] 늘 맨 위 ·
               [...] 색 / Shared (GitHub) 켜고 끄기 / Notes list / Delete · [x] 닫기
     본문    : 서식 있는 글 (붙여 넣기는 글자만 - 다른 프로그램의 배경색 · 글꼴이 색 노트를 깨지 않게)
-    아래    : B I U S • (Ctrl+B / I / U / T / Shift+L) · 오른쪽 아래 모서리 = 크기 조절
+    아래    : B I U S • (Ctrl+B / I / U / T / Shift+L)
+    크기    : v01.12 - 일반 창처럼 네 변 · 네 모서리 어디를 잡고 끌어도 크기 조절 (오른쪽 아래 ◢ 손잡이도 그대로)
 
 모든 UI 문자열은 영어 (한국어는 주석만).
 """
 
 import re
 
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QKeySequence, QPalette, QShortcut, QTextCharFormat,
                            QTextCursor, QTextFormat, QTextListFormat)
 from PySide6.QtWidgets import (QApplication, QColorDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
@@ -48,6 +49,7 @@ def strip_base_size(html):
 MIN_SIZE = QSize(200, 140)
 TITLE_MIN_W, TITLE_MAX_W = 60, 160   # v01.10 제목칸 너비 (글자만큼, 띠에 잡을 곳이 남게)
 PIN_ON = "#FFB3B3"          # 켜진 Pin = 연한 빨강 (JUN 툴들과 같은 표시)
+EDGE = 5                    # v01.12 가장자리 크기 조절 손잡이 두께 (px) - 모서리는 EDGE * 2 정사각형
 
 
 class _Editor(QTextEdit):
@@ -80,6 +82,54 @@ class _Header(QFrame):
 
     def mouseReleaseEvent(self, event):
         self._grab = None
+
+
+class _EdgeHandle(QWidget):
+    """v01.12 창 가장자리 크기 조절 손잡이 (투명, 변 4 + 모서리 4).
+    테두리 없는 창이라 OS 가장자리 끌기가 없고, 띠 · 본문 · 아래 줄이 창 끝까지 차서 창 자체는 가장자리 마우스를 못 받는다 →
+    맨 위에 얇은 투명 위젯을 얹어 받는다. 누르면 OS 크기 조절(startSystemResize - 창 끌기와 같은 매끈함 · 화면 끝 맞춤),
+    OS 가 못 하면(오프스크린 등) 직접 계산."""
+
+    def __init__(self, window, edges, cursor):
+        super().__init__(window)
+        self._window = window
+        self.edges = edges
+        self.setCursor(cursor)
+        self._press = None          # (누른 화면 좌표, 누를 때 창 geometry) - 직접 계산할 때만
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            return
+        event.accept()
+        handle = self._window.windowHandle()
+        if handle is not None and handle.startSystemResize(self.edges):
+            return
+        self._press = (event.globalPosition().toPoint(), QRect(self._window.geometry()))
+
+    def mouseMoveEvent(self, event):
+        if self._press is None or not event.buttons() & Qt.LeftButton:
+            return
+        event.accept()
+        self._window.setGeometry(resized_rect(self._press[1], self.edges,
+                                              event.globalPosition().toPoint() - self._press[0],
+                                              self._window.minimumSize()))
+
+    def mouseReleaseEvent(self, event):
+        self._press = None
+
+
+def resized_rect(rect, edges, delta, min_size):
+    """v01.12 직접 크기 조절 계산 - 잡은 변만 움직이고, 최소 크기에서는 반대 변이 밀리지 않게 잡은 변을 멈춘다."""
+    left, top, right, bottom = rect.left(), rect.top(), rect.right(), rect.bottom()
+    if edges & Qt.LeftEdge:
+        left = min(left + delta.x(), right + 1 - min_size.width())
+    if edges & Qt.RightEdge:
+        right = max(right + delta.x(), left - 1 + min_size.width())
+    if edges & Qt.TopEdge:
+        top = min(top + delta.y(), bottom + 1 - min_size.height())
+    if edges & Qt.BottomEdge:
+        bottom = max(bottom + delta.y(), top - 1 + min_size.height())
+    return QRect(QPoint(left, top), QPoint(right, bottom))
 
 
 class _TitleEdit(QLineEdit):
@@ -258,6 +308,18 @@ class NoteWindow(QWidget):
         self.grip = QSizeGrip(self.footer)
         fl.addWidget(self.grip, 0, Qt.AlignBottom | Qt.AlignRight)
         root.addWidget(self.footer)
+
+        # v01.12 네 변 · 네 모서리 크기 조절 - 다른 위젯보다 위에 (마지막에 만들고 raise)
+        self.edge_handles = []
+        for edges, cursor in ((Qt.TopEdge, Qt.SizeVerCursor), (Qt.BottomEdge, Qt.SizeVerCursor),
+                              (Qt.LeftEdge, Qt.SizeHorCursor), (Qt.RightEdge, Qt.SizeHorCursor),
+                              (Qt.TopEdge | Qt.LeftEdge, Qt.SizeFDiagCursor),
+                              (Qt.BottomEdge | Qt.RightEdge, Qt.SizeFDiagCursor),
+                              (Qt.TopEdge | Qt.RightEdge, Qt.SizeBDiagCursor),
+                              (Qt.BottomEdge | Qt.LeftEdge, Qt.SizeBDiagCursor)):
+            h = _EdgeHandle(self, edges, cursor)
+            h.raise_()
+            self.edge_handles.append(h)
 
         for seq, key in (("Ctrl+B", "bold"), ("Ctrl+I", "italic"), ("Ctrl+U", "underline"), ("Ctrl+T", "strike"),
                          ("Ctrl+Shift+L", "bullet"), ("Ctrl+Shift+,", "size_down"), ("Ctrl+Shift+.", "size_up"),
@@ -567,8 +629,26 @@ class NoteWindow(QWidget):
         if not self._loading:
             self._geo_timer.start()
 
+    def _place_edge_handles(self):
+        """v01.12 손잡이를 창 가장자리에 맞춘다 (변은 모서리를 뺀 길이)."""
+        w, h, c = self.width(), self.height(), EDGE * 2
+        for handle in self.edge_handles:
+            e = handle.edges
+            if e == Qt.TopEdge:
+                handle.setGeometry(c, 0, max(0, w - 2 * c), EDGE)
+            elif e == Qt.BottomEdge:
+                handle.setGeometry(c, h - EDGE, max(0, w - 2 * c), EDGE)
+            elif e == Qt.LeftEdge:
+                handle.setGeometry(0, c, EDGE, max(0, h - 2 * c))
+            elif e == Qt.RightEdge:
+                handle.setGeometry(w - EDGE, c, EDGE, max(0, h - 2 * c))
+            else:                                                   # 모서리
+                handle.setGeometry(0 if e & Qt.LeftEdge else w - c, 0 if e & Qt.TopEdge else h - c, c, c)
+            handle.raise_()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._place_edge_handles()
         if not self._loading:
             self._geo_timer.start()
 
