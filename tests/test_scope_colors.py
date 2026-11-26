@@ -97,7 +97,13 @@ try:
     bg = QColor(st.palette(lw.color)["body"])
     diff = abs(edge.red() - bg.red()) + abs(edge.green() - bg.green()) + abs(edge.blue() - bg.blue())
     check("Push Shared button shows its border (it was plain text)", diff > 60 and
-          "QToolButton#pushShared {" in lw.styleSheet(), (edge.name(), bg.name()))
+          "QToolButton#pushShared" in lw.styleSheet(), (edge.name(), bg.name()))
+    # v01.13 Pull Shared 도 같은 테두리
+    pimg = lw.btn_pull.grab().toImage()
+    pedge = pimg.pixelColor(0, pimg.height() // 2)
+    pdiff = abs(pedge.red() - bg.red()) + abs(pedge.green() - bg.green()) + abs(pedge.blue() - bg.blue())
+    check("Pull Shared button shows the same border", pdiff > 60 and pedge.name() == edge.name() and
+          "QToolButton#pullShared" in lw.styleSheet(), (pedge.name(), bg.name()))
     for win in list(c.windows.values()):
         win.close_quietly()
     lw.close()

@@ -119,6 +119,7 @@ class ListWindow(QWidget):
     startMenuRequested = Signal()
     taskbarRequested = Signal()
     pushSharedRequested = Signal()              # v01.03 공유 노트만 GitHub 로
+    pullSharedRequested = Signal()              # v01.13 다른 PC 가 올린 공유 노트 받기
 
     def __init__(self, store):
         super().__init__(None, Qt.Window)
@@ -225,6 +226,16 @@ class ListWindow(QWidget):
         self.lbl_count = QLabel("")
         self.lbl_count.setObjectName("count")
         bottom.addWidget(self.lbl_count, 1)
+        # v01.13 Pull Shared - Push Shared 옆. 다른 PC 가 올린 공유 노트를 받아 목록 · 열린 노트에 반영 (커밋 · 푸시 없음)
+        self.btn_pull = QToolButton(self)
+        self.btn_pull.setObjectName("pullShared")
+        self.btn_pull.setText("Pull Shared")
+        self.btn_pull.setToolTip("Get the Shared notes another PC pushed to GitHub (git pull).\n"
+                                 "Open notes are saved first; your unpushed edits are kept and merged.\n"
+                                 "Nothing is committed or pushed.")
+        self.btn_pull.setCursor(Qt.PointingHandCursor)
+        self.btn_pull.clicked.connect(self.pullSharedRequested.emit)
+        bottom.addWidget(self.btn_pull)
         # v01.03 Push Shared - 공유 노트(shared/notes)만 커밋해 GitHub 로 (이 PC 노트 · 다른 파일은 안 올라간다)
         self.btn_push = QToolButton(self)
         self.btn_push.setObjectName("pushShared")
@@ -238,7 +249,7 @@ class ListWindow(QWidget):
 
         # Shrink 가 감추는 것들 (애니메이션 · Shrunk · Pin 만 남는다)
         self._shrink_hidden = [self.lbl_title, self.btn_new, self.btn_menu, self.ipf_search, self.list,
-                               self.lbl_count, self.btn_push] + list(self.scope_buttons.buttons())
+                               self.lbl_count, self.btn_pull, self.btn_push] + list(self.scope_buttons.buttons())
 
         view = store.list_view
         self.set_color(view.get("color") or st.DEFAULT_LIST_COLOR, emit=False)
@@ -347,10 +358,11 @@ class ListWindow(QWidget):
             "font-weight: bold; }}"
             "#listWindow > QToolButton#pinBtn:checked {{ background: {pin}; color: #202020; border: 1px solid {ring}; }}"
             # v01.07 '#listWindow > QToolButton'(투명)이 더 구체적이라 Push Shared 테두리가 안 보였다 → 같은 구체성으로
-            "#listWindow > QToolButton#pushShared {{ color: {text}; background: {field}; border: 1px solid {ring}; border-radius: 3px; "
-            "padding: 3px 10px; }}"
-            "#listWindow > QToolButton#pushShared:hover {{ border-color: {text}; }}"
-            "#listWindow > QToolButton#pushShared:disabled {{ color: {ring}; }}"
+            # v01.13 Pull Shared 도 같은 모양
+            "#listWindow > QToolButton#pushShared, #listWindow > QToolButton#pullShared {{ color: {text}; background: {field}; "
+            "border: 1px solid {ring}; border-radius: 3px; padding: 3px 10px; }}"
+            "#listWindow > QToolButton#pushShared:hover, #listWindow > QToolButton#pullShared:hover {{ border-color: {text}; }}"
+            "#listWindow > QToolButton#pushShared:disabled, #listWindow > QToolButton#pullShared:disabled {{ color: {ring}; }}"
             "#count {{ color: {text}; }}".format(field=field, ring=ring, pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
         if emit:
             self.store.list_view["color"] = color

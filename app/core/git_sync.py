@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Python Script by Ji Hun Park
-# last Update date : 2026-11-23
-# JUN_Memo - 공유 노트만 git 으로 올리기 (v01.03, Qt 비의존)
+# last Update date : 2026-11-26
+# JUN_Memo - 공유 노트만 git 으로 올리기 (v01.03) · 받기 (v01.13), Qt 비의존
 """
 Push Shared = 공유 노트 폴더(shared/notes)만 커밋하고 푸시한다.
 
@@ -13,6 +13,10 @@ Push Shared = 공유 노트 폴더(shared/notes)만 커밋하고 푸시한다.
 
 돌려주는 값 = PushResult(status, message, committed, pulled)
     status : "pushed" / "nothing" / "blocked" / "error"
+
+Pull Shared (v01.13) = 다른 PC 가 올린 것을 받기만 한다 (git pull --rebase --autostash). 커밋 · 푸시 없음.
+    돌려주는 값 = PullResult(status, message, commits, shared_files, app_files)
+    status : "pulled" / "nothing" / "error"
 커밋 메시지에는 PC 이름 같은 것을 넣지 않는다(공개 저장소일 수 있다).
 """
 
@@ -129,3 +133,79 @@ def push_shared(shared_dir, remote="origin"):
 def _branch(root):
     _c, out, _e = git(root, "rev-parse", "--abbrev-ref", "HEAD")
     return out
+
+
+# ---------------------------------------------------------------- v01.13 Pull Shared
+class PullResult(object):
+    __slots__ = ("status", "message", "commits", "shared_files", "app_files")
+
+    def __init__(self, status, message, commits=0, shared_files=None, app_files=None):
+        self.status = status                    # "pulled" / "nothing" / "error"
+        self.message = message
+        self.commits = commits                  # 받아 온 커밋 수
+        self.shared_files = shared_files or []  # 받아 온 변경 중 공유 노트 파일
+        self.app_files = app_files or []        # 그 밖의 파일 (앱 코드 등 - 다시 켜야 반영)
+
+    def __repr__(self):
+        return "PullResult({0!r}, commits={1}, shared={2}, app={3})".format(
+            self.status, self.commits, len(self.shared_files), len(self.app_files))
+
+
+def _rebase_in_progress(root):
+    for name in ("rebase-merge", "rebase-apply"):
+        _c, out, _e = git(root, "rev-parse", "--git-path", name, check=False)
+        path = out if os.path.isabs(out) else os.path.join(root, out)
+        if out and os.path.isdir(path):
+            return True
+    return False
+
+
+def pull_shared(shared_dir, remote="origin"):
+    """v01.13 Pull Shared - 다른 PC 가 올린 공유 노트를 받는다 (git pull --rebase --autostash).
+
+    부르기 전에 열린 노트를 저장해 두면, 이 PC 에서 고친 공유 노트(아직 안 올린 것)는 autostash 로 잠시 치웠다가
+    받은 뒤 다시 얹힌다 - 다른 문단이면 git 이 합친다(v01.11 줄 배열). 아무것도 커밋 · 푸시하지 않는다.
+    브랜치 전체를 받으므로 앱 코드가 바뀌었을 수도 있다 → app_files 로 알린다(다시 켜야 반영).
+    실패하면 되돌린다: 리베이스 중 충돌이면 rebase --abort (받기 전 그대로).
+    """
+    try:
+        root = repo_root(shared_dir)
+        rel = _rel(root, shared_dir)
+        code, _o, _e = git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}", check=False)
+        if code != 0:
+            return PullResult("error", "This branch has no upstream on GitHub, so there is nothing to pull from.")
+        git(root, "fetch", "-q", remote)
+        _c, behind, _e = git(root, "rev-list", "--count", "HEAD..@{u}")
+        commits = int(behind) if behind.isdigit() else 0
+        if commits == 0:
+            return PullResult("nothing", "Already up to date - no new shared notes on GitHub.")
+        _c, out, _e = git(root, "diff", "--name-only", "HEAD...@{u}")
+        files = [f for f in out.splitlines() if f.strip()]
+        prefix = rel.rstrip("/") + "/"
+        shared_files = [f for f in files if f.startswith(prefix)]
+        app_files = [f for f in files if not f.startswith(prefix)]
+
+        code, out, err = git(root, "pull", "--rebase", "--autostash", remote, _branch(root), check=False)
+        if code != 0:
+            aborted = False
+            if _rebase_in_progress(root):
+                git(root, "rebase", "--abort", check=False)
+                aborted = True
+            last = (err or out).splitlines()[-1] if (err or out) else code
+            return PullResult("error", "Pull failed: {0}{1}".format(
+                last, "\nNothing was changed (the pull was undone)." if aborted else ""))
+        _c, unmerged, _e = git(root, "diff", "--name-only", "--diff-filter=U")
+        conflicts = [f for f in unmerged.splitlines() if f.strip()]
+        if conflicts:
+            # autostash 를 다시 얹다 충돌 - 받은 것은 들어왔고, 이 PC 에서 고친 것은 git stash 에 남아 있다
+            return PullResult("error", "Got the new commits, but your local changes clash with them in:\n{0}{1}\n"
+                                       "Your local version is kept in 'git stash'. Fix the files (look for <<<<<<<), "
+                                       "then use Reload shared notes.".format(
+                                           "\n".join(conflicts[:5]), "\n..." if len(conflicts) > 5 else ""),
+                              commits, shared_files, app_files)
+        msg = "Pulled {0} commit(s) from GitHub: {1} shared note file(s) changed.".format(commits, len(shared_files))
+        if app_files:
+            msg += "\nApp files changed too ({0}) - restart JUN Memo to use them.".format(len(app_files))
+        return PullResult("pulled", msg, commits, shared_files, app_files)
+    except GitError as exc:
+        return PullResult("error", str(exc))

@@ -5,7 +5,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 
 ![preview](icon/JUN_Memo.png)
 
-- **버전**: `app/config/version.py` (v01.12 — 네 변 · 네 모서리에서 노트 크기 조절 · v01.07 — Shared 파랑 / This PC 초록 배지 · v01.06 — **고른 글자만 크기**(T− / T+) · 목록 버튼이 잘 보이게 · v01.05 — **글자 크기**(노트마다 · 목록) · v01.04 — 목록 창 **Shrink**(움직이는 아이콘) · v01.03 — 끌어 고른 영역이 보이게 · **Push Shared** 버튼 · v01.02 — 범위 라디오 버튼이 잘 보이게 · v01.01 — 목록 창 색 · Pin, 공유(GitHub) / 이 PC 노트, 시작 메뉴 · 작업 표시줄) · 변경 기록 [`CHANGELOG.md`](CHANGELOG.md)
+- **버전**: `app/config/version.py` (v01.13 — **Pull Shared** 버튼 · v01.12 — 네 변 · 네 모서리에서 노트 크기 조절 · v01.07 — Shared 파랑 / This PC 초록 배지 · v01.06 — **고른 글자만 크기**(T− / T+) · 목록 버튼이 잘 보이게 · v01.05 — **글자 크기**(노트마다 · 목록) · v01.04 — 목록 창 **Shrink**(움직이는 아이콘) · v01.03 — 끌어 고른 영역이 보이게 · **Push Shared** 버튼 · v01.02 — 범위 라디오 버튼이 잘 보이게 · v01.01 — 목록 창 색 · Pin, 공유(GitHub) / 이 PC 노트, 시작 메뉴 · 작업 표시줄) · 변경 기록 [`CHANGELOG.md`](CHANGELOG.md)
 - **필요한 것**: Python 3.9+ · `pip install -r requirements.txt` (PySide6)
 - **실행**: `Run_JUN_Memo.bat` 더블클릭(콘솔 창 없이) 또는 `pythonw launch.py`
 
@@ -34,7 +34,7 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
 - **`Pin`** — 목록 창을 늘 맨 위에(켜지면 `Pinned` · 연한 빨강). 줄인 동안에는 Shrunk 아래.
 - **`…`** — 목록 창 **색**(7색 견본 · `Custom list color...`) · `Reload shared notes` · **`Add to Start Menu`** · `Pin to Taskbar` (4장).
   목록 창은 모든 부분(배경 · 글자 · 검색칸)을 고른 색으로 칠한다 — 윈도우 다크 모드에서도 글자가 보인다. 색 · Pin · 자리는 기억.
-- **`Push Shared`** (아래) — 공유 노트만 GitHub 로 (3장).
+- **`Pull Shared`** · **`Push Shared`** (아래) — 다른 PC 의 공유 노트 받기 · 공유 노트만 GitHub 로 (3장).
 - **글자 크기** (v01.05) — 목록 위에서 Ctrl + 휠, `…` > Larger / Smaller / Reset text size.
 - **All / Shared / This PC** — 범위로 거르기(3장). 카드의 배지 · 왼쪽 띠 색으로도 구분 — Shared 파랑, This PC 초록. 고른 것은 원 안에 점 · 굵은 글자. 카드 왼쪽 위에 범위 표시.
 - **Search** — 적은 낱말이 **모두** 들어 있는 노트만(대소문자 무시).
@@ -90,7 +90,13 @@ Windows 10 · 11 의 **스티커 메모(Sticky Notes)** 처럼 쓰는 독립 실
   - 다른 PC 가 먼저 올렸으면 받아서(`git pull --rebase --autostash`) 다시 푸시하고, 받은 공유 노트를 목록에 읽어 들인다.
   - 브랜치에 아직 안 올라간 **다른 커밋**(코드 등)이 있으면 그것까지 나가므로 **푸시하지 않고** 알린다 — 그 커밋을 먼저 올린 뒤 다시 누른다.
   - 바뀐 것이 없으면 "nothing to push". git 이 설치돼 있고 GitHub 로그인(Git Credential Manager)이 돼 있어야 한다.
-- 받기만 할 때는 `git pull` 뒤 목록 `…` > `Reload shared notes`.
+- **받기 = `Push Shared` 옆 `Pull Shared` 버튼** (v01.13) — 열린 노트를 저장하고 `git pull --rebase --autostash`. 커밋 · 푸시는 하지 않는다.
+  - 이 PC 에서 고쳤지만 아직 안 올린 공유 노트는 그대로 남는다(autostash — 받은 것 위에 다시 얹힌다).
+  - 받은 공유 노트를 목록에 읽고, **내용이 바뀐 열린 노트는 같은 자리에 다시 열린다**(받은 내용 + 이 PC 에서 고친 것).
+  - 앱 파일도 바뀌었으면 알린다 — JUN Memo 를 다시 켜야 반영된다.
+  - 같은 노트를 두 PC 에서 고쳐 부딪히면 파일 이름을 알리고, 이 PC 쪽은 `git stash` 에 남는다(`<<<<<<<` 를 고친 뒤 `Reload shared notes`).
+    안 올린 다른 커밋이 받은 것과 부딪히면 받기를 되돌린다(받기 전 그대로).
+- 터미널에서 `git pull` 했다면 목록 `…` > `Reload shared notes`.
 - `Reload shared notes` 는 열어 둔 공유 노트는 손대지 않는다(고치는 중인 글이 바뀌지 않게) — 닫고 다시 읽으면 바뀐다.
 - **주의**: 공유 노트는 GitHub 저장소에 그대로 올라간다. 저장소가 공개면 누구나 본다 — 개인적인 것은 This PC 로.
 
@@ -111,7 +117,7 @@ JUN_Memo/
 ├── Run_JUN_Memo.bat       # pythonw 로 실행
 ├── app/config/version.py
 ├── app/core/store.py      # 노트 저장소(이 PC + 공유) · 색 팔레트 · 미리보기 (Qt 비의존)
-├── app/core/git_sync.py   # Push Shared - 공유 노트만 커밋 · 푸시 (v01.03)
+├── app/core/git_sync.py   # Push Shared - 공유 노트만 커밋 · 푸시 (v01.03) · Pull Shared - 받기 (v01.13)
 ├── app/core/shell_integration.py  # 시작 메뉴 바로가기 · 고정 · 창 재실행 정보 (Video Tool 에서 옮김)
 ├── app/ui/note_window.py  # 스티커 창
 ├── app/ui/memo_anim.py    # Shrink 동안의 아이콘 애니메이션 (v01.04)
@@ -119,7 +125,7 @@ JUN_Memo/
 ├── app/ui/controller.py   # 목록 · 노트 창 · 저장 잇기 (자동 저장, 빈 노트 지우기, 다시 열기)
 ├── icon/JUN_Memo.ico · .png
 ├── shared/notes/          # 공유 노트 (<id>.json, git 으로 올라간다)
-└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py · test_scope_colors.py · test_default_color.py · test_reorder.py · test_title_badge.py · test_header_popup.py · test_shared_lines.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
+└── tests/test_memo.py · test_scope_list.py · test_push_shared.py · test_pull_shared.py · test_shrink.py · test_text_size.py · test_selection_size.py · test_scope_colors.py · test_default_color.py · test_reorder.py · test_title_badge.py · test_header_popup.py · test_shared_lines.py   # 오프스크린 시험 (push 는 임시 git 저장소로)
 ```
 
 ## 6. 시험

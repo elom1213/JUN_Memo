@@ -47,7 +47,12 @@
 # 01.12  (2026-11-24) 노트 크기를 일반 창처럼 - 오른쪽 아래 손잡이만이 아니라 네 변 · 네 모서리 어디를 잡고 끌어도 크기 조절
 #        (가장자리 5 px 투명 손잡이 + 맞는 마우스 모양, OS 크기 조절 startSystemResize, 안 되면 직접 계산 · 최소 크기에서 멈춤).
 
-VERSION = "01.12"
+# 01.13  (2026-11-26) 목록 창 Push Shared 옆에 Pull Shared 버튼(사용자) - 다른 PC 가 올린 공유 노트를 받는다
+#        (열린 노트 저장 → git pull --rebase --autostash, 커밋 · 푸시 없음). 받은 공유 노트를 목록에 읽고, 내용이 바뀐 열린 공유 노트는
+#        같은 자리에 다시 연다(그냥 두면 다음 저장이 옛 내용으로 받은 것을 덮었다). 앱 파일도 바뀌었으면 다시 켜라고 알림,
+#        리베이스 충돌이면 rebase --abort 로 받기 전 그대로, autostash 충돌이면 파일 이름과 stash 를 알림.
+
+VERSION = "01.13"
 APP_NAME = "JUN Memo"
 APP_USER_MODEL_ID = "JUN.Memo"
-LAST_UPDATE = "2026-11-24"
+LAST_UPDATE = "2026-11-26"

@@ -445,9 +445,14 @@ class NoteStore(object):
         self.order = new
         return True
 
-    def reload_shared(self):
+    def reload_shared(self, include_open=False):
         """공유 폴더를 다시 읽는다 (git pull 뒤). 열린 창이 없는 공유 노트만 바뀐다 - 고치는 중인 노트는 건드리지 않는다.
-        돌려주는 값: (새로 생긴 수, 바뀐 수, 없어진 수)."""
+        돌려주는 값: (새로 생긴 수, 바뀐 수, 없어진 수).
+
+        v01.13 include_open=True (Pull Shared) - 열린 공유 노트도 디스크 내용으로 바꾼다. Pull 은 받기 전에 열린 노트를
+        저장하고 autostash 로 합치므로 디스크 쪽이 '받은 것 + 이 PC 에서 고친 것' 이다. 열린 노트를 그대로 두면
+        다음 저장이 옛 내용으로 받은 것을 덮는다. 바뀐 열린 노트 id 는 self.reloaded_open 에 (창을 다시 열어야)."""
+        self.reloaded_open = []
         on_disk = {}
         if os.path.isdir(self.shared_dir):
             for name in os.listdir(self.shared_dir):
@@ -465,10 +470,13 @@ class NoteStore(object):
             if cur is None:
                 self.notes[note_id] = fresh
                 added += 1
-            elif cur["scope"] == SCOPE_SHARED and not cur["open"] and self._shared_payload(cur) != payload:
+            elif cur["scope"] == SCOPE_SHARED and (include_open or not cur["open"]) and \
+                    self._shared_payload(cur) != payload:
                 for k in CONTENT_KEYS:
                     cur[k] = fresh[k]
                 changed += 1
+                if cur["open"]:
+                    self.reloaded_open.append(note_id)
             self._shared_written[note_id] = payload
         for note_id in [i for i, n in self.notes.items() if n["scope"] == SCOPE_SHARED and i not in on_disk
                         and not n["open"]]:

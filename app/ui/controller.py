@@ -43,6 +43,7 @@ class Controller(QObject):
         lw.startMenuRequested.connect(self.add_to_start_menu)
         lw.taskbarRequested.connect(self.pin_to_taskbar)
         lw.pushSharedRequested.connect(self.push_shared)
+        lw.pullSharedRequested.connect(self.pull_shared)        # v01.13
         self.messages = []                          # 마지막 안내 문구들 (시험이 본다)
         self.quiet = False                          # True 면 메시지 창을 띄우지 않는다 (시험)
         self._save_timer = QTimer(self)
@@ -269,6 +270,40 @@ class Controller(QObject):
             self.list_window.refresh()
             text += "\nFrom the other PC: {0} new, {1} changed, {2} removed.".format(added, changed, removed)
         self._inform("Push Shared", text, warn=result.status in ("error", "blocked"))
+
+    def pull_shared(self):
+        """v01.13 Pull Shared - 열린 노트까지 저장하고 git pull --rebase --autostash (core/git_sync), 받은 공유 노트를
+        목록에 읽고, 내용이 바뀐 열린 공유 노트는 창을 같은 자리에 다시 연다(옛 내용으로 덮어쓰지 않게)."""
+        for note_id in list(self.windows):
+            self._pull_content(note_id)
+            self._pull_geometry(note_id)
+        self.save_now()
+        lw = self.list_window
+        lw.btn_pull.setEnabled(False)
+        lw.btn_pull.setText("Pulling...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            result = git_sync.pull_shared(self.store.shared_dir)
+        finally:
+            QApplication.restoreOverrideCursor()
+            lw.btn_pull.setText("Pull Shared")
+            lw.btn_pull.setEnabled(True)
+        self.last_pull = result
+        text = result.message
+        if result.status == "pulled":
+            added, changed, removed = self.store.reload_shared(include_open=True)
+            for note_id in self.store.reloaded_open:
+                win = self.windows.pop(note_id, None)
+                if win is not None:
+                    win.close_quietly()
+                    self.open_note(note_id)
+            self.list_window.refresh()
+            self.save_now()
+            text += "\nIn the list: {0} new, {1} changed, {2} removed.".format(added, changed, removed)
+            if self.store.reloaded_open:
+                text += "\n{0} open note(s) were refreshed with the new text.".format(len(self.store.reloaded_open))
+        self._inform("Pull Shared", text, warn=result.status == "error")
 
     def set_pinned(self, note_id, on):
         if self.store.update(note_id, pinned=bool(on)):
