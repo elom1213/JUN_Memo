@@ -1,5 +1,22 @@
 # Changelog — JUN_Memo
 
+## [01.14] - 2026-11-26
+
+- **[Add] 풀 해야 할 때 · 푸시해야 할 때 알림**(사용자 — `A000080_3030_JUN_Library` v01.01 과 같은 방식).
+  - **원격 확인**: 시작 · 목록 창을 다시 볼 때(마지막 확인이 1분 넘었으면) · 5분마다 **백그라운드** `git fetch`(창이 멈추지 않는다,
+    작업 트리 · 브랜치는 그대로) → 원격에만 있는 커밋 수와 그 커밋이 바꾼 공유 노트 · 앱 파일을 센다(`core/git_sync.remote_status`).
+  - **풀 할 때**: `Pull Shared ●`(굵은 파란 테두리) + 목록 아래 알림 막대 `⬇ New on GitHub: N shared note files from another PC` · `Pull now`.
+    앱 파일만 바뀐 커밋이면 `(app files only)`. 툴팁에 마지막 확인 결과(Up to date / 실패 이유).
+  - **푸시할 때**: 커밋 안 됐거나 아직 안 올라간 공유 노트가 있으면 `Push Shared ●`(굵은 주황 테두리, 툴팁에 파일 목록).
+    공유 노트를 저장하면 2초 뒤 fetch 없이 다시 센다. **10분 넘게 남아 있으면** 알림 막대 `⬆ N shared note files not pushed yet` · `Push now`
+    (치는 동안 매번 띄우지 않게). 켤 때 이미 남아 있던 것(지난번에 안 올린 것)은 바로 알린다. 이 PC 노트 · 다른 파일은 세지 않는다.
+  - 둘 다면 받을 것이 먼저. `Later` = 감춤 — 받을 커밋이 더 늘거나, 다 올린 뒤 새로 생기면 다시 뜬다.
+  - **줄인 창**(Shrink)은 알림 막대 대신 아이콘 오른쪽 위에 **점**(파랑 = Pull, 주황 = Push).
+  - `…` 메뉴에 `Check GitHub for new shared notes every few minutes`(기본 켜짐, 이 PC 에 기억) · `Check GitHub now`.
+  - git 은 한 번에 하나 — `Pull Shared` / `Push Shared` 는 돌고 있는 확인이 끝나길 기다린 뒤 실행하고, 끝나면 바로 다시 센다.
+  - 다른 PC 가 올린 파일이 `Push ●` 에 섞이지 않게 `@{u}...HEAD`(세 점)로 센다(JUN_Library 에서 고친 것과 같은 함정).
+- 시험 `tests/test_sync_notice.py` 36항목(실제 git, 임시 원격 + 클론 둘, 백그라운드 스레드 포함). 전체 302항목.
+
 ## [01.13] - 2026-11-26
 
 - **[Add] 목록 창 `Push Shared` 옆에 `Pull Shared` 버튼**(사용자). 지금까지는 받기만 하려면 터미널에서 `git pull` 뒤 `…` > `Reload shared notes` 를 눌러야 했다.

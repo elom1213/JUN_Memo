@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Python Script by Ji Hun Park
-# last Update date : 2026-11-23
+# last Update date : 2026-11-26
 # JUN_Memo - 목록 창 · 노트 창 · 저장소를 잇는다
 """
 - 글을 칠 때마다 쓰지 않고 SAVE_MS 뒤에 한 번 저장(마지막 입력 기준). 앱을 끌 때 · 노트를 닫을 때는 바로 저장.
@@ -8,7 +8,12 @@
 - 다시 켜면 열려 있던 노트들을 그 자리 · 크기 · 색 · 핀 그대로 다시 연다. 저장된 자리가 지금 화면 밖이면(모니터를 뺐을 때) 주 화면으로.
 - v01.01: 노트 범위(Shared = 저장소 shared/notes, This PC = %APPDATA%), 목록 창 색 · Pin · 자리, 시작 메뉴 · 작업 표시줄
   (0110_JUN_Video_Tool 과 같은 셸 통합 - core/shell_integration).
+- v01.14 동기화 알림 (A000080 JUN_Library 와 같은 방식): 시작 · 목록 창을 다시 볼 때(1분 넘게 지났으면) · 5분마다
+  백그라운드 git fetch → remote(behind · incoming · pending) → 목록 창이 Pull Shared ● · Push Shared ● · 알림 막대로 알린다.
+  공유 노트를 저장하면 잠시 뒤 fetch 없이 다시 세어 Push 점을 갱신. git 은 한 번에 하나 - Pull / Push 는 확인이 끝나길 기다린다.
 """
+
+import time
 
 from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
@@ -21,8 +26,12 @@ from app.core import shell_integration
 from app.core import store as st
 from app.ui.list_window import ListWindow
 from app.ui.note_window import DEFAULT_SIZE, NoteWindow
+from app.ui.sync_worker import SyncWorker
 
 SAVE_MS = 500
+CHECK_INTERVAL_MS = 5 * 60 * 1000       # v01.14 원격 확인 주기
+CHECK_ON_ACTIVATE_SEC = 60.0            # 목록 창을 다시 볼 때 이보다 오래됐으면 확인
+PENDING_DELAY_MS = 2000                 # 저장 뒤 안 올린 공유 노트를 다시 세기까지
 
 
 class Controller(QObject):
@@ -44,12 +53,29 @@ class Controller(QObject):
         lw.taskbarRequested.connect(self.pin_to_taskbar)
         lw.pushSharedRequested.connect(self.push_shared)
         lw.pullSharedRequested.connect(self.pull_shared)        # v01.13
+        lw.activated.connect(self.window_activated)              # v01.14
+        lw.checkRemoteToggled.connect(self.set_check_remote)
+        lw.checkNowRequested.connect(lambda: self.check_remote())
         self.messages = []                          # 마지막 안내 문구들 (시험이 본다)
         self.quiet = False                          # True 면 메시지 창을 띄우지 않는다 (시험)
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(SAVE_MS)
         self._save_timer.timeout.connect(self.save_now)
+        # v01.14 동기화 알림
+        self.remote = {"behind": 0, "incoming": [], "app_files": [], "pending": [], "error": "", "checked": False}
+        self.auto_check = False                     # start() 가 켠다 (quiet 시험에서는 꺼짐)
+        self._checker = None
+        self._recount = False                       # 확인 중에 저장됨 → 끝나면 fetch 없이 다시 센다
+        self._last_check = 0.0
+        self._closing = False
+        self._check_timer = QTimer(self)
+        self._check_timer.setInterval(CHECK_INTERVAL_MS)
+        self._check_timer.timeout.connect(self.check_remote)
+        self._pending_timer = QTimer(self)
+        self._pending_timer.setSingleShot(True)
+        self._pending_timer.setInterval(PENDING_DELAY_MS)
+        self._pending_timer.timeout.connect(lambda: self.check_remote(fetch=False))
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self.shutdown)
@@ -68,8 +94,19 @@ class Controller(QObject):
         if QGuiApplication.platformName() == "windows":
             # 작업 표시줄 버튼을 우클릭 → 고정했을 때 python 이 아니라 이 앱이 실행되게 (Video Tool 과 같은 방식)
             QTimer.singleShot(0, lambda: shell_integration.set_window_relaunch(int(self.list_window.winId())))
+        # v01.14 원격 확인 - 시험(quiet)에서는 저절로 돌지 않는다
+        self.auto_check = not self.quiet
+        if self.auto_check:
+            QTimer.singleShot(0, lambda: self.check_remote(fetch=False))      # 지난번 남긴 안 올린 노트 먼저
+            if self.check_enabled():
+                QTimer.singleShot(1500, self.check_remote)
+                self._check_timer.start()
 
     def shutdown(self):
+        self._closing = True
+        self._check_timer.stop()
+        self._pending_timer.stop()
+        self._wait_checker()
         for note_id, win in list(self.windows.items()):
             self._pull_content(note_id)
             self._pull_geometry(note_id)
@@ -87,6 +124,8 @@ class Controller(QObject):
         if self.store.error:
             print("[JUN_Memo] " + self.store.error)
         self.list_window.refresh()
+        if self.auto_check and not self._closing:
+            self._pending_timer.start()             # v01.14 Push Shared ● 갱신 (모아서 한 번)
 
     def _pull_content(self, note_id):
         win = self.windows.get(note_id)
@@ -252,6 +291,7 @@ class Controller(QObject):
         for note_id in list(self.windows):
             self._pull_content(note_id)
         self.save_now()
+        self._wait_checker()                        # v01.14 git 은 한 번에 하나
         lw = self.list_window
         lw.btn_push.setEnabled(False)
         lw.btn_push.setText("Pushing...")
@@ -269,6 +309,7 @@ class Controller(QObject):
             added, changed, removed = self.store.reload_shared()
             self.list_window.refresh()
             text += "\nFrom the other PC: {0} new, {1} changed, {2} removed.".format(added, changed, removed)
+        self.recount_now()
         self._inform("Push Shared", text, warn=result.status in ("error", "blocked"))
 
     def pull_shared(self):
@@ -278,6 +319,7 @@ class Controller(QObject):
             self._pull_content(note_id)
             self._pull_geometry(note_id)
         self.save_now()
+        self._wait_checker()                        # v01.14 git 은 한 번에 하나
         lw = self.list_window
         lw.btn_pull.setEnabled(False)
         lw.btn_pull.setText("Pulling...")
@@ -303,7 +345,82 @@ class Controller(QObject):
             text += "\nIn the list: {0} new, {1} changed, {2} removed.".format(added, changed, removed)
             if self.store.reloaded_open:
                 text += "\n{0} open note(s) were refreshed with the new text.".format(len(self.store.reloaded_open))
+        self.recount_now()
         self._inform("Pull Shared", text, warn=result.status == "error")
+
+    # ---------------------------------------------------------------- v01.14 동기화 알림
+    def check_enabled(self):
+        return bool(self.store.list_view.get("check_remote", True))
+
+    def set_check_remote(self, on):
+        self.store.list_view["check_remote"] = bool(on)
+        self.save_now()
+        if on and self.auto_check:
+            self._check_timer.start()
+            self.check_remote()
+        else:
+            self._check_timer.stop()
+
+    def check_remote(self, fetch=True):
+        """백그라운드로 (git fetch +) 원격과 비교. 이미 확인 중이면 건너뛴다(저장 뒤 다시 세기는 끝난 뒤로 미룬다)."""
+        if self._closing:
+            return False
+        if self._checker is not None:
+            if not fetch:
+                self._recount = True
+            return False
+        if fetch:
+            self._last_check = time.monotonic()
+        self._checker = SyncWorker(git_sync.remote_status, self.store.shared_dir, fetch)
+        self._checker.done.connect(self._remote_checked)
+        self._checker.finished.connect(self._checker_finished)
+        self._checker.start()
+        return True
+
+    def _wait_checker(self):
+        """확인이 돌고 있으면 끝나길 기다린다 (Pull / Push 의 git 과 겹치지 않게, fetch 는 30초 상한)."""
+        if self._checker is not None:
+            self._checker.wait(40000)
+            QApplication.processEvents()            # done · finished 신호 처리
+
+    def recount_now(self):
+        """Pull / Push 직후 - fetch 없이 바로 다시 센다 (방금 원격을 봤다)."""
+        self._remote_checked(git_sync.remote_status(self.store.shared_dir, fetch=False))
+
+    def window_activated(self):
+        """목록 창을 다시 볼 때 - 마지막 확인이 1분 넘었으면 다시 확인."""
+        if self.auto_check and self.check_enabled() and time.monotonic() - self._last_check > CHECK_ON_ACTIVATE_SEC:
+            self.check_remote()
+
+    def _remote_checked(self, state):
+        if not isinstance(state, dict):
+            return
+        state = dict(state)
+        if state.get("pending") is None:            # 워커가 실패하면 안 올린 목록은 그대로 둔다
+            state["pending"] = self.remote.get("pending", [])
+        self.remote = dict(state, checked=True)
+        self.list_window.set_sync(self.remote, self.remote_text(), self.push_text())
+
+    def _checker_finished(self):
+        self._checker = None
+        if self._recount and not self._closing:
+            self._recount = False
+            self.check_remote(fetch=False)
+
+    def remote_text(self):
+        """알림 막대 · 툴팁 문구 (영어)."""
+        n = self.remote.get("behind", 0)
+        shared = len(self.remote.get("incoming", []))
+        if shared:
+            return "New on GitHub: {0} shared note file{1} from another PC - Pull to get {2}.".format(
+                shared, "" if shared == 1 else "s", "it" if shared == 1 else "them")
+        return "New on GitHub: {0} commit{1} (app files only) - Pull to get the latest.".format(
+            n, "" if n == 1 else "s")
+
+    def push_text(self):
+        n = len(self.remote.get("pending", []))
+        return "{0} shared note file{1} not pushed yet - Push to back {2} up to GitHub.".format(
+            n, "" if n == 1 else "s", "it" if n == 1 else "them")
 
     def set_pinned(self, note_id, on):
         if self.store.update(note_id, pinned=bool(on)):

@@ -197,7 +197,8 @@ class NoteStore(object):
         self.local_dir = local_dir
         self.shared_dir = shared_dir or default_shared_dir()
         self.notes = {}             # id -> note
-        self.list_view = {"color": DEFAULT_LIST_COLOR, "pinned": False, "geometry": None, "shrunk": False, "zoom": 1.0}
+        self.list_view = {"color": DEFAULT_LIST_COLOR, "pinned": False, "geometry": None, "shrunk": False, "zoom": 1.0,
+                          "check_remote": True}       # v01.14 GitHub 확인(알림) 켜짐
         self.order = []                     # v01.08 끌어 놓아 정한 목록 순서 (id). 비어 있으면 최근에 고친 것이 위
         self.note_color = DEFAULT_COLOR     # v01.08 새 노트의 기본 색 - 마지막으로 고른(저장된) 노트 색을 따른다
         self.error = ""             # 마지막 읽기 / 쓰기 문제 (UI 가 로그로 보여 준다)
@@ -278,6 +279,7 @@ class NoteStore(object):
                           "pinned": bool(lv.get("pinned", False)),
                           "shrunk": bool(lv.get("shrunk", False)),
                           "zoom": clamp_zoom(lv.get("zoom", 1.0)),
+                          "check_remote": bool(lv.get("check_remote", True)),       # v01.14
                           "geometry": [int(v) for v in geo] if isinstance(geo, (list, tuple)) and len(geo) == 4 else None}
         order = state.get("order")
         self.order = [str(i) for i in order if str(i) in self.notes] if isinstance(order, list) else []

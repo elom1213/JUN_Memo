@@ -51,6 +51,7 @@ class MemoAnim(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(150, 118)
+        self.hint = ""                  # v01.14 동기화 알림 점
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Click to open the notes list again")
         self._colors = list(st.COLORS)
@@ -62,6 +63,15 @@ class MemoAnim(QWidget):
         self.elapsed_override = None    # 시험용: 이 ms 로 그린다
 
     # ---------------------------------------------------------------- 상태
+    def set_hint(self, kind, tip=""):
+        """v01.14 동기화 알림 점 - 'pull'(파랑) / 'push'(주황) / ''(없음). 오른쪽 위에 그린다."""
+        if kind == getattr(self, "hint", ""):
+            self.setToolTip(tip or "Click to open the notes list")
+            return
+        self.hint = kind
+        self.setToolTip(tip or "Click to open the notes list")
+        self.update()
+
     def set_running(self, on):
         if on and not self._timer.isActive():
             self._clock.restart()
@@ -119,6 +129,14 @@ class MemoAnim(QWidget):
 
         # ---- 연필
         self._draw_pencil(p, t, cx, cy, y_off)
+
+        # ---- v01.14 동기화 알림 점 (Pull = 파랑, Push = 주황)
+        hint = getattr(self, "hint", "")
+        if hint:
+            p.setOpacity(1.0)
+            p.setPen(QPen(QColor("#FFFFFF"), 2))
+            p.setBrush(QColor("#1A73E8" if hint == "pull" else "#E8710A"))
+            p.drawEllipse(QPointF(self.width() - 10.0, 10.0), 7.0, 7.0)
         p.end()
 
     def _draw_note(self, p, pal, t, peel):

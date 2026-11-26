@@ -52,7 +52,12 @@
 #        같은 자리에 다시 연다(그냥 두면 다음 저장이 옛 내용으로 받은 것을 덮었다). 앱 파일도 바뀌었으면 다시 켜라고 알림,
 #        리베이스 충돌이면 rebase --abort 로 받기 전 그대로, autostash 충돌이면 파일 이름과 stash 를 알림.
 
-VERSION = "01.13"
+# 01.14  (2026-11-26) 동기화 알림 (A000080 JUN_Library 와 같은 방식, 사용자) - 시작 · 목록 창을 다시 볼 때(1분 넘었으면) · 5분마다
+#        백그라운드 git fetch → 원격에 새 커밋이 있으면 Pull Shared ●(파란 테두리) + 알림 막대 Pull now, 안 올린 공유 노트가 있으면
+#        Push Shared ●(주황 테두리), 10분 넘게 남으면(시작 때 남아 있던 것은 바로) 알림 막대 Push now. Later 로 감춤. 줄인 창은 아이콘 점.
+#        `…` 에 Check GitHub ... every few minutes(기본 켜짐) · Check GitHub now. Pull / Push 는 확인이 끝나길 기다린 뒤 실행.
+
+VERSION = "01.14"
 APP_NAME = "JUN Memo"
 APP_USER_MODEL_ID = "JUN.Memo"
 LAST_UPDATE = "2026-11-26"

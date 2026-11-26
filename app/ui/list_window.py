@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Python Script by Ji Hun Park
-# last Update date : 2026-11-23
+# last Update date : 2026-11-26
 # JUN_Memo - 노트 목록 창
 """
 윈도우 스티커 메모의 "노트 목록" 과 같은 창: [+] 새 노트 · Pin · [...] · 검색 · 범위 필터 · 노트 카드.
@@ -11,6 +11,11 @@ v01.01
   윈도우 다크 모드에서 Qt 가 흰 글자를 주는데 배경만 밝게 칠해 글자가 안 보이던 것.
 - Pin = 늘 맨 위. 범위 필터 All / Shared / This PC, 카드마다 범위 표시.
 - [...] 에 Reload shared notes · Add to Start Menu · Pin to Taskbar (0110_JUN_Video_Tool 과 같은 셸 통합).
+
+v01.14 동기화 알림 (A000080 JUN_Library 와 같은 방식)
+- 원격에 새 커밋이 있으면 `Pull Shared ●`(파란 테두리) + 알림 막대 `Pull now`.
+- 안 올린 공유 노트가 있으면 `Push Shared ●`(주황 테두리), 10분 넘게 남으면(시작 때 남아 있던 것은 바로) 알림 막대 `Push now`.
+- `Later` = 감춤(받을 것이 더 늘거나 안 올린 것이 다 올라간 뒤 새로 생기면 다시). 줄인 창은 애니메이션 오른쪽 위 점.
 
 모든 UI 문자열은 영어 (한국어는 주석만).
 """
@@ -33,6 +38,11 @@ SHRINK_HEIGHT = 155
 PIN_ON = "#FFB3B3"
 SCOPE_ALL = "all"
 SCOPE_LABEL = {st.SCOPE_SHARED: "Shared", st.SCOPE_LOCAL: "This PC"}
+
+PULL_COLOR = "#1A73E8"      # v01.14 받을 것 (Shared 와 같은 파랑)
+PUSH_COLOR = "#E8710A"      # v01.14 올릴 것 (주황)
+PUSH_REMIND_SEC = 10 * 60   # 안 올린 공유 노트가 이만큼 지나면 Push 알림 (치는 동안 매번 띄우지 않게)
+STARTUP_SEC = 30.0          # 시작 직후 발견한 안 올린 노트 = 지난번에 남긴 것 → 바로 알림
 
 
 def when(ts, now=None):
@@ -120,6 +130,9 @@ class ListWindow(QWidget):
     taskbarRequested = Signal()
     pushSharedRequested = Signal()              # v01.03 공유 노트만 GitHub 로
     pullSharedRequested = Signal()              # v01.13 다른 PC 가 올린 공유 노트 받기
+    activated = Signal()                        # v01.14 창을 다시 봄 (원격 확인)
+    checkRemoteToggled = Signal(bool)           # v01.14 GitHub 확인 켜기 / 끄기
+    checkNowRequested = Signal()
 
     def __init__(self, store):
         super().__init__(None, Qt.Window)
@@ -222,6 +235,39 @@ class ListWindow(QWidget):
         self.list.customContextMenuRequested.connect(self._on_menu)
         root.addWidget(self.list, 1)
 
+        # v01.14 동기화 알림 막대 - Pull 할 것 / 오래된 안 올린 공유 노트
+        self.notice = QFrame(self)
+        self.notice.setObjectName("syncNotice")
+        self.notice.setAttribute(Qt.WA_StyledBackground, True)
+        nl = QHBoxLayout(self.notice)
+        nl.setContentsMargins(8, 3, 4, 3)
+        self.lbl_notice = QLabel()
+        self.lbl_notice.setWordWrap(True)
+        self.lbl_notice.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.btn_notice = QToolButton(self.notice)
+        self.btn_notice.setObjectName("noticeAction")
+        self.btn_notice.setCursor(Qt.PointingHandCursor)
+        self.btn_notice.clicked.connect(self._notice_action)
+        self.btn_notice_close = QToolButton(self.notice)
+        self.btn_notice_close.setObjectName("noticeLater")
+        self.btn_notice_close.setText("Later")
+        self.btn_notice_close.setToolTip("Hide this notice until something new happens")
+        self.btn_notice_close.setCursor(Qt.PointingHandCursor)
+        self.btn_notice_close.clicked.connect(self._notice_dismiss)
+        nl.addWidget(self.lbl_notice, 1)
+        nl.addWidget(self.btn_notice)
+        nl.addWidget(self.btn_notice_close)
+        self.notice.hide()
+        self.notice_kind = ""
+        self.sync = {"behind": 0, "incoming": [], "app_files": [], "pending": [], "error": "", "checked": False}
+        self._pull_text = ""
+        self._push_text = ""
+        self._dismiss_pull = 0                  # 이 수 이하로 behind 면 안 띄움 (Later 누른 때의 수)
+        self._dismiss_push = False              # 안 올린 노트가 0 이 될 때까지 안 띄움
+        self._pending_since = None
+        self._born = time.monotonic()
+        root.addWidget(self.notice)
+
         bottom = QHBoxLayout()
         self.lbl_count = QLabel("")
         self.lbl_count.setObjectName("count")
@@ -309,6 +355,16 @@ class ListWindow(QWidget):
         self.act_reload.setToolTip("Read shared/notes again (after git pull).")
         self.act_reload.triggered.connect(self.reloadRequested.emit)
         menu.addAction(self.act_reload)
+        # v01.14 GitHub 확인 (알림)
+        self.act_check = QAction("Check GitHub for new shared notes every few minutes", menu)
+        self.act_check.setCheckable(True)
+        self.act_check.setChecked(bool(self.store.list_view.get("check_remote", True)))
+        self.act_check.setToolTip("Shows a notice when another PC pushed notes (Pull) or when you have notes to push")
+        self.act_check.toggled.connect(self.checkRemoteToggled.emit)
+        menu.addAction(self.act_check)
+        self.act_check_now = QAction("Check GitHub now", menu)
+        self.act_check_now.triggered.connect(self.checkNowRequested.emit)
+        menu.addAction(self.act_check_now)
         menu.addSeparator()
         self.act_start = QAction("Add to Start Menu", menu)
         self.act_start.triggered.connect(self.startMenuRequested.emit)
@@ -363,7 +419,17 @@ class ListWindow(QWidget):
             "border: 1px solid {ring}; border-radius: 3px; padding: 3px 10px; }}"
             "#listWindow > QToolButton#pushShared:hover, #listWindow > QToolButton#pullShared:hover {{ border-color: {text}; }}"
             "#listWindow > QToolButton#pushShared:disabled, #listWindow > QToolButton#pullShared:disabled {{ color: {ring}; }}"
-            "#count {{ color: {text}; }}".format(field=field, ring=ring, pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg, **pal))
+            # v01.14 할 일이 있으면 굵은 색 테두리 (받을 것 = 파랑, 올릴 것 = 주황)
+            "#listWindow > QToolButton#pullShared[hint=\"true\"] {{ border: 2px solid {pull}; font-weight: bold; }}"
+            "#listWindow > QToolButton#pushShared[hint=\"true\"] {{ border: 2px solid {push}; font-weight: bold; }}"
+            "#syncNotice {{ background: {field}; border: 2px solid {pull}; border-radius: 4px; }}"
+            "#syncNotice[kind=\"push\"] {{ border-color: {push}; }}"
+            "#syncNotice QToolButton {{ color: {text}; background: {field}; border: 1px solid {ring}; border-radius: 3px; "
+            "padding: 2px 8px; }}"
+            "#syncNotice QToolButton:hover {{ border-color: {text}; }}"
+            "#syncNotice QToolButton#noticeAction {{ font-weight: bold; }}"
+            "#count {{ color: {text}; }}".format(field=field, ring=ring, pin=PIN_ON, sel_bg=sel_bg, sel_fg=sel_fg,
+                                               pull=PULL_COLOR, push=PUSH_COLOR, **pal))
         if emit:
             self.store.list_view["color"] = color
             self.viewChanged.emit()
@@ -524,6 +590,7 @@ class ListWindow(QWidget):
             self._full_size = (self.width(), self.height())
             for w in self._shrink_hidden:
                 w.hide()
+            self.notice.hide()                      # v01.14 줄인 동안은 애니메이션 점으로
             self.button_grid.addWidget(self.btn_pin, 1, 0)
             self.anim.show()
             self.anim.set_running(True)
@@ -533,6 +600,7 @@ class ListWindow(QWidget):
             self.button_grid.addWidget(self.btn_pin, 0, 1)
             for w in self._shrink_hidden:
                 w.show()
+            self._update_notice()                   # v01.14 알림 막대는 할 일이 있을 때만
         self.btn_shrink.setText("Shrunk" if on else "Shrink")
         lay = self.layout()
         lay.invalidate()
@@ -545,3 +613,90 @@ class ListWindow(QWidget):
         if emit:
             self.store.list_view["shrunk"] = on
             self.viewChanged.emit()
+
+    # ---------------------------------------------------------------- v01.14 동기화 알림
+    def set_sync(self, remote, pull_text, push_text):
+        """controller 가 원격 확인 결과를 넘긴다 → 버튼 점 · 툴팁 · 알림 막대 · 줄인 창 점."""
+        self.sync = dict(remote)
+        self._pull_text = pull_text
+        self._push_text = push_text
+        behind = self.sync.get("behind", 0)
+        pending = self.sync.get("pending", [])
+        self.btn_pull.setText("Pull Shared ●" if behind else "Pull Shared")
+        self.btn_push.setText("Push Shared ●" if pending else "Push Shared")
+        for btn, on in ((self.btn_pull, bool(behind)), (self.btn_push, bool(pending))):
+            btn.setProperty("hint", on)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+        tip = ("Get the Shared notes another PC pushed to GitHub (git pull).\n"
+               "Open notes are saved first; your unpushed edits are kept and merged.\n"
+               "Nothing is committed or pushed.")
+        if behind:
+            tip += "\n\n" + pull_text
+        elif self.sync.get("error"):
+            tip += "\n\nLast check: " + self.sync["error"]
+        elif self.sync.get("checked"):
+            tip += "\n\nUp to date with GitHub."
+        self.btn_pull.setToolTip(tip)
+        tip = ("Send the Shared notes to GitHub (only shared/notes - This PC notes stay here).\n"
+               "If another PC pushed first, its shared notes are pulled in, then this pushes.")
+        if pending:
+            tip += "\n\nNot pushed yet:\n" + "\n".join(pending[:12]) + ("\n..." if len(pending) > 12 else "")
+        self.btn_push.setToolTip(tip)
+        self._update_notice()
+
+    def sync_hint(self):
+        """'pull' / 'push' / '' - 알림 막대와 줄인 창 점이 같이 쓴다. 받을 것이 먼저."""
+        now = time.monotonic()
+        pending = self.sync.get("pending", [])
+        if pending:
+            if self._pending_since is None:          # 시작할 때부터 있던 것은 바로, 새로 생긴 것은 잠시 뒤에 알림
+                self._pending_since = 0.0 if now - self._born < STARTUP_SEC else now
+        else:
+            self._pending_since = None
+            self._dismiss_push = False
+        behind = self.sync.get("behind", 0)
+        if not behind:
+            self._dismiss_pull = 0
+        if behind > self._dismiss_pull:
+            return "pull"
+        if pending and not self._dismiss_push and now - self._pending_since >= PUSH_REMIND_SEC:
+            return "push"
+        return ""
+
+    def _update_notice(self):
+        kind = self.sync_hint()
+        self.notice_kind = kind
+        if kind == "pull":
+            self.lbl_notice.setText("⬇  " + self._pull_text)
+            self.btn_notice.setText("Pull now")
+        elif kind == "push":
+            self.lbl_notice.setText("⬆  " + self._push_text)
+            self.btn_notice.setText("Push now")
+        if kind:
+            self.lbl_notice.setToolTip(self.lbl_notice.text())
+            self.notice.setProperty("kind", kind)
+            self.notice.style().unpolish(self.notice)
+            self.notice.style().polish(self.notice)
+        self.notice.setVisible(bool(kind) and not self.shrunk)
+        self.anim.set_hint(kind, self.lbl_notice.text() if kind else "")
+
+    def _notice_action(self):
+        kind = self.notice_kind
+        if kind == "pull":
+            self.pullSharedRequested.emit()
+        elif kind == "push":
+            self.pushSharedRequested.emit()
+
+    def _notice_dismiss(self):
+        if self.notice_kind == "pull":
+            self._dismiss_pull = self.sync.get("behind", 0)
+        elif self.notice_kind == "push":
+            self._dismiss_push = True
+        self._update_notice()
+
+    def changeEvent(self, e):
+        if e.type() == QEvent.ActivationChange and self.isActiveWindow():
+            self.activated.emit()
+            self._update_notice()                   # 안 올린 노트가 오래됐으면 이때 알림
+        super().changeEvent(e)

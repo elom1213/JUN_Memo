@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Python Script by Ji Hun Park
 # last Update date : 2026-11-26
-# JUN_Memo - 공유 노트만 git 으로 올리기 (v01.03) · 받기 (v01.13), Qt 비의존
+# JUN_Memo - 공유 노트만 git 으로 올리기 (v01.03) · 받기 (v01.13) · 알림용 원격 확인 (v01.14), Qt 비의존
 """
 Push Shared = 공유 노트 폴더(shared/notes)만 커밋하고 푸시한다.
 
@@ -17,6 +17,9 @@ Push Shared = 공유 노트 폴더(shared/notes)만 커밋하고 푸시한다.
 Pull Shared (v01.13) = 다른 PC 가 올린 것을 받기만 한다 (git pull --rebase --autostash). 커밋 · 푸시 없음.
     돌려주는 값 = PullResult(status, message, commits, shared_files, app_files)
     status : "pulled" / "nothing" / "error"
+
+remote_status (v01.14) = 알림용. git fetch 만 해서 원격에 새 커밋(Pull 할 것)이 있는지 · 안 올린 공유 노트가 있는지 센다.
+    작업 트리 · 브랜치는 건드리지 않는다(fetch 는 원격 추적 ref 만 바꾼다). A000080 JUN_Library 와 같은 방식.
 커밋 메시지에는 PC 이름 같은 것을 넣지 않는다(공개 저장소일 수 있다).
 """
 
@@ -48,15 +51,16 @@ def _flags():
     return getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform.startswith("win") else 0
 
 
-def git(cwd, *args, check=True):
-    """git 을 부르고 (코드, 표준 출력, 표준 에러)."""
+def git(cwd, *args, check=True, timeout=None):
+    """git 을 부르고 (코드, 표준 출력, 표준 에러). timeout 을 주면 그 초(v01.14 원격 확인은 짧게)."""
+    limit = timeout or GIT_TIMEOUT
     try:
-        proc = subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, timeout=GIT_TIMEOUT,
+        proc = subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, timeout=limit,
                               creationflags=_flags())
     except FileNotFoundError:
         raise GitError("git was not found. Install Git for Windows and try again.")
     except subprocess.TimeoutExpired:
-        raise GitError("git {0} took too long (over {1} s).".format(args[0], GIT_TIMEOUT))
+        raise GitError("git {0} took too long (over {1} s).".format(args[0], limit))
     out = proc.stdout.decode("utf-8", "replace").strip()
     err = proc.stderr.decode("utf-8", "replace").strip()
     if check and proc.returncode != 0:
@@ -209,3 +213,70 @@ def pull_shared(shared_dir, remote="origin"):
         return PullResult("pulled", msg, commits, shared_files, app_files)
     except GitError as exc:
         return PullResult("error", str(exc))
+
+
+# ---------------------------------------------------------------- v01.14 동기화 알림
+def _has_upstream(root):
+    code, _o, _e = git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}", check=False)
+    return code == 0
+
+
+def _status_paths(root, rel):
+    """커밋 안 된 공유 노트 (새 파일 · 고친 것 · 지운 것)."""
+    _c, out, _e = git(root, "status", "--porcelain", "-uall", "--", rel, check=False)
+    files = []
+    for line in out.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:                      # 이름 바뀜 = 새 이름
+            path = path.split(" -> ", 1)[1]
+        files.append(path.strip().strip('"'))
+    return files
+
+
+def pending_shared(shared_dir):
+    """Push Shared 점 표시용 - 커밋 안 됐거나 아직 안 올라간 공유 노트 파일 (저장소 기준 경로, 정렬).
+    @{u}...HEAD (세 점) = 내 쪽에서만 바뀐 것. 두 점이면 fetch 뒤 다른 PC 가 올린 파일까지 섞인다(JUN_Library 에서 고친 것)."""
+    try:
+        root = repo_root(shared_dir)
+    except GitError:
+        return []
+    rel = _rel(root, shared_dir)
+    files = set(_status_paths(root, rel))
+    if _has_upstream(root):
+        _c, out, _e = git(root, "diff", "--name-only", "@{u}...HEAD", "--", rel, check=False)
+        files.update(f for f in out.splitlines() if f.strip())
+    return sorted(files)
+
+
+def remote_status(shared_dir, fetch=True, remote="origin"):
+    """알림용 - 원격과 비교한 상태 (예외 없이 dict).
+
+    {"behind": 원격에만 있는 커밋 수, "incoming": 그 커밋들이 바꾼 공유 노트 파일, "app_files": 그 밖의 파일,
+     "pending": 커밋 안 됐거나 아직 안 올라간 공유 노트 파일, "error": 실패 이유(영어, 없으면 빈 문자열)}
+    """
+    st = {"behind": 0, "incoming": [], "app_files": [], "pending": [], "error": ""}
+    try:
+        root = repo_root(shared_dir)
+        rel = _rel(root, shared_dir)
+        st["pending"] = pending_shared(shared_dir)
+        if not _has_upstream(root):
+            st["error"] = "This branch has no upstream on GitHub."
+            return st
+        if fetch:
+            code, out, err = git(root, "fetch", "-q", remote, check=False, timeout=30)
+            if code != 0:
+                lines = [l for l in (err or out).splitlines() if l.strip()]
+                st["error"] = "Could not check GitHub: {0}".format(lines[-1] if lines else code)
+        code, out, _e = git(root, "rev-list", "--count", "HEAD..@{u}", check=False)
+        st["behind"] = int(out) if code == 0 and out.isdigit() else 0
+        if st["behind"]:
+            _c, out, _e = git(root, "diff", "--name-only", "HEAD...@{u}", check=False)
+            files = [f for f in out.splitlines() if f.strip()]
+            prefix = rel.rstrip("/") + "/"
+            st["incoming"] = [f for f in files if f.startswith(prefix)]
+            st["app_files"] = [f for f in files if not f.startswith(prefix)]
+    except GitError as exc:
+        st["error"] = str(exc)
+    return st
